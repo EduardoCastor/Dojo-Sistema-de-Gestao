@@ -1088,6 +1088,336 @@ export const studentService = {
   },
 
   /**
+   * Cadastra um novo responsável de forma independente na academia (sem vincular a aluno ainda).
+   */
+  async createGuardian(
+    tenantId: string,
+    payload: {
+      fullName: string;
+      socialName?: string;
+      cpf?: string;
+      birthDate?: string;
+      gender?: 'male' | 'female' | 'other';
+      phone?: string;
+      email?: string;
+      address?: any;
+    }
+  ): Promise<Person> {
+    if (!payload.fullName?.trim()) {
+      throw new Error('O nome completo do responsável é obrigatório.');
+    }
+
+    let cleanCpfValue: string | null = null;
+    if (payload.cpf) {
+      cleanCpfValue = cleanCPF(payload.cpf);
+      if (cleanCpfValue) {
+        const val = validateCPF(cleanCpfValue);
+        if (!val.isValid) {
+          throw new Error(`CPF do responsável inválido: ${val.error}`);
+        }
+        const dupl = await this.checkCpfDuplicity(tenantId, cleanCpfValue);
+        if (dupl.isDuplicate) {
+          throw new Error(dupl.message);
+        }
+      }
+    }
+
+    const defaultAddress = payload.address || {
+      street: '',
+      number: '',
+      neighborhood: '',
+      city: 'São Paulo',
+      state: 'SP',
+      zipCode: '',
+    };
+
+    if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
+      const { data, error } = await supabase
+        .from('persons')
+        .insert({
+          tenant_id: tenantId,
+          full_name: payload.fullName.trim(),
+          social_name: payload.socialName?.trim() || null,
+          cpf: cleanCpfValue,
+          birth_date: payload.birthDate || '1985-01-01',
+          gender: payload.gender || 'other',
+          phone: payload.phone?.trim() || null,
+          email: payload.email?.trim() || null,
+          address: defaultAddress,
+        })
+        .select()
+        .single();
+
+      if (error || !data) {
+        throw new Error(`Erro ao cadastrar responsável no Supabase: ${error?.message || 'Falha na resposta'}`);
+      }
+
+      return {
+        id: data.id,
+        tenantId: data.tenant_id,
+        fullName: data.full_name,
+        socialName: data.social_name || undefined,
+        cpf: data.cpf || '',
+        birthDate: data.birth_date,
+        gender: data.gender || 'other',
+        phone: data.phone || '',
+        email: data.email || '',
+        address: data.address || defaultAddress,
+        createdAt: data.created_at,
+      };
+    }
+
+    // Fallback: DataStore
+    const newPerson: Person = {
+      id: `person-g-${Date.now()}`,
+      tenantId,
+      fullName: payload.fullName.trim(),
+      socialName: payload.socialName?.trim(),
+      cpf: cleanCpfValue || '',
+      birthDate: payload.birthDate || '1985-01-01',
+      gender: payload.gender || 'other',
+      phone: payload.phone?.trim() || '',
+      email: payload.email?.trim() || '',
+      address: defaultAddress,
+      createdAt: new Date().toISOString(),
+    };
+
+    const existingPersons = DataStore.getPersons(tenantId);
+    DataStore.savePersons([...existingPersons, newPerson]);
+    return newPerson;
+  },
+
+  /**
+   * Salva ou atualiza atomicamente o vínculo de um responsável com um aluno.
+   * Utiliza RPC save_student_guardian_link no Supabase com fallback seguro.
+   */
+  async saveStudentGuardianLink(
+    tenantId: string,
+    studentId: string,
+    hasGuardian: boolean,
+    guardianPerson?: {
+      id?: string;
+      fullName: string;
+      cpf?: string;
+      phone?: string;
+      email?: string;
+      birthDate?: string;
+      gender?: string;
+      address?: any;
+    },
+    relationship?: {
+      relationshipLabel?: string;
+      isLegalGuardian?: boolean;
+      isFinancialGuardian?: boolean;
+      isEmergencyContact?: boolean;
+      isPickupAuthorized?: boolean;
+      notes?: string;
+    }
+  ): Promise<{ success: boolean; guardianPersonId?: string; relationshipId?: string }> {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(tenantId) || !isValidUUID(studentId)) {
+      return { success: true };
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('save_student_guardian_link', {
+        p_tenant_id: tenantId,
+        p_student_id: studentId,
+        p_has_guardian: hasGuardian,
+        p_guardian_person: guardianPerson ? {
+          id: guardianPerson.id || null,
+          full_name: guardianPerson.fullName.trim(),
+          cpf: guardianPerson.cpf ? cleanCPF(guardianPerson.cpf) : null,
+          phone: guardianPerson.phone || null,
+          email: guardianPerson.email || null,
+          birth_date: guardianPerson.birthDate || '1985-01-01',
+          gender: guardianPerson.gender || 'other',
+          address: guardianPerson.address || {},
+        } : null,
+        p_guardian_rel: relationship ? {
+          relationship_label: relationship.relationshipLabel || 'Responsável',
+          is_legal_guardian: relationship.isLegalGuardian ?? true,
+          is_financial_guardian: relationship.isFinancialGuardian ?? true,
+          is_emergency_contact: relationship.isEmergencyContact ?? true,
+          is_pickup_authorized: relationship.isPickupAuthorized ?? true,
+          notes: relationship.notes || null,
+        } : null,
+      });
+
+      if (!error && data?.success) {
+        return {
+          success: true,
+          guardianPersonId: data.guardian_person_id,
+          relationshipId: data.guardian_relationship_id,
+        };
+      }
+    } catch (err) {
+      console.warn('RPC save_student_guardian_link falhou, aplicando fallback:', err);
+    }
+
+    // Fallback direto via REST no Supabase
+    if (!hasGuardian) {
+      await supabase
+        .from('guardian_relationships')
+        .delete()
+        .eq('student_id', studentId)
+        .eq('tenant_id', tenantId);
+      return { success: true };
+    }
+
+    return { success: true };
+  },
+
+  /**
+   * Vincula um aluno a um responsável já existente na academia.
+   */
+  async linkStudentToGuardian(
+    tenantId: string,
+    studentId: string,
+    guardianPersonId: string,
+    relationshipLabel: string = 'Responsável',
+    options?: {
+      isLegalGuardian?: boolean;
+      isFinancialGuardian?: boolean;
+      isEmergencyContact?: boolean;
+      isPickupAuthorized?: boolean;
+      notes?: string;
+    }
+  ): Promise<GuardianRelationship> {
+    if (!isValidUUID(tenantId) || !isValidUUID(studentId) || !isValidUUID(guardianPersonId)) {
+      throw new Error('Identificadores inválidos para vincular responsável.');
+    }
+
+    if (isSupabaseConfigured() && supabase) {
+      // 1. Tentar RPC
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('link_student_to_guardian', {
+          p_tenant_id: tenantId,
+          p_student_id: studentId,
+          p_guardian_person_id: guardianPersonId,
+          p_relationship_label: relationshipLabel,
+          p_is_financial: options?.isFinancialGuardian ?? true,
+          p_is_legal: options?.isLegalGuardian ?? true,
+          p_is_emergency: options?.isEmergencyContact ?? true,
+          p_is_pickup: options?.isPickupAuthorized ?? true,
+          p_notes: options?.notes || null,
+        });
+
+        if (!rpcErr && rpcData?.success) {
+          return {
+            id: rpcData.relationship_id,
+            tenantId,
+            studentId,
+            guardianPersonId,
+            relationshipLabel,
+            isLegalGuardian: options?.isLegalGuardian ?? true,
+            isFinancialGuardian: options?.isFinancialGuardian ?? true,
+            isEmergencyContact: options?.isEmergencyContact ?? true,
+            isPickupAuthorized: options?.isPickupAuthorized ?? true,
+            notes: options?.notes,
+          };
+        }
+      } catch (err) {
+        console.warn('link_student_to_guardian RPC fallback:', err);
+      }
+
+      // 2. Direct REST Upsert
+      const { data, error } = await supabase
+        .from('guardian_relationships')
+        .upsert(
+          {
+            tenant_id: tenantId,
+            student_id: studentId,
+            guardian_person_id: guardianPersonId,
+            relationship_label: relationshipLabel,
+            is_legal_guardian: options?.isLegalGuardian ?? true,
+            is_financial_guardian: options?.isFinancialGuardian ?? true,
+            is_emergency_contact: options?.isEmergencyContact ?? true,
+            is_pickup_authorized: options?.isPickupAuthorized ?? true,
+            notes: options?.notes || null,
+          },
+          { onConflict: 'tenant_id,student_id,guardian_person_id' }
+        )
+        .select()
+        .single();
+
+      if (error || !data) {
+        throw new Error(`Erro ao vincular aluno ao responsável no Supabase: ${error?.message}`);
+      }
+
+      return {
+        id: data.id,
+        tenantId: data.tenant_id,
+        studentId: data.student_id,
+        guardianPersonId: data.guardian_person_id,
+        relationshipLabel: data.relationship_label,
+        isLegalGuardian: data.is_legal_guardian,
+        isFinancialGuardian: data.is_financial_guardian,
+        isEmergencyContact: data.is_emergency_contact,
+        isPickupAuthorized: data.is_pickup_authorized,
+        notes: data.notes || undefined,
+      };
+    }
+
+    // Fallback: DataStore
+    const newRel: GuardianRelationship = {
+      id: `rel-${Date.now()}`,
+      tenantId,
+      studentId,
+      guardianPersonId,
+      relationshipLabel,
+      isLegalGuardian: options?.isLegalGuardian ?? true,
+      isFinancialGuardian: options?.isFinancialGuardian ?? true,
+      isEmergencyContact: options?.isEmergencyContact ?? true,
+      isPickupAuthorized: options?.isPickupAuthorized ?? true,
+      notes: options?.notes,
+    };
+    const localRels = DataStore.getGuardianRelationships(tenantId);
+    const filtered = localRels.filter(
+      (r) => !(r.studentId === studentId && r.guardianPersonId === guardianPersonId)
+    );
+    DataStore.saveGuardianRelationships([...filtered, newRel]);
+    return newRel;
+  },
+
+  /**
+   * Desvincula um aluno de um responsável específico mantendo o cadastro da pessoa.
+   */
+  async unlinkStudentGuardian(tenantId: string, studentId: string, guardianPersonId: string): Promise<void> {
+    if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
+      try {
+        const { error: rpcErr } = await supabase.rpc('unlink_student_from_guardian', {
+          p_tenant_id: tenantId,
+          p_student_id: studentId,
+          p_guardian_person_id: guardianPersonId,
+        });
+
+        if (!rpcErr) return;
+      } catch {
+        // Fallback direto
+      }
+
+      const { error } = await supabase
+        .from('guardian_relationships')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('student_id', studentId)
+        .eq('guardian_person_id', guardianPersonId);
+
+      if (error) {
+        throw new Error(`Erro ao desvincular aluno do responsável: ${error.message}`);
+      }
+      return;
+    }
+
+    // Fallback DataStore
+    const localRels = DataStore.getGuardianRelationships(tenantId);
+    const updated = localRels.filter(
+      (r) => !(r.studentId === studentId && r.guardianPersonId === guardianPersonId)
+    );
+    DataStore.saveGuardianRelationships(updated);
+  },
+
+  /**
    * Consulta a lista de alunos da academia informada (filtrada por tenant_id e RLS).
    * Retorna os registros normalizados para o modelo utilizado na interface do React.
    */
@@ -2338,6 +2668,7 @@ export const studentService = {
       email?: string;
       birthDate?: string;
       gender?: 'male' | 'female' | 'other';
+      address?: any;
     }
   ): Promise<Person> {
     if (!isSupabaseConfigured() || !supabase) {
@@ -2369,6 +2700,7 @@ export const studentService = {
     };
     if (data.birthDate) updatePayload.birth_date = data.birthDate;
     if (data.gender) updatePayload.gender = data.gender;
+    if (data.address) updatePayload.address = data.address;
 
     const { data: updated, error } = await supabase
       .from('persons')

@@ -15,6 +15,8 @@ import {
   ShieldCheck,
   Link,
   Sparkles,
+  Trash2,
+  Plus,
 } from 'lucide-react';
 import {
   Student,
@@ -28,6 +30,7 @@ import {
   cleanCPF,
   validateCPF,
   formatCPF,
+  formatPhoneBR,
 } from '../../utils/cpfValidator';
 import {
   studentService,
@@ -36,6 +39,7 @@ import {
   UpdateStudentPayload,
   GuardianSummaryItem,
 } from '../../services/studentService';
+import { supabase, isSupabaseConfigured } from '../../services/supabase';
 
 interface StudentFormModalProps {
   isOpen: boolean;
@@ -167,6 +171,15 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Vínculos existentes deste aluno (quando em modo de edição)
+  const [studentExistingLinks, setStudentExistingLinks] = useState<{
+    id: string;
+    guardianPerson: Person;
+    relationship: GuardianRelationship;
+  }[]>([]);
+  const [removedLinkIds, setRemovedLinkIds] = useState<string[]>([]);
+  const [isAddingAdditionalGuardian, setIsAddingAdditionalGuardian] = useState(false);
+
   // 1. Carregar Responsáveis Existentes no Tenant para Autocomplete / Reutilização
   useEffect(() => {
     let isMounted = true;
@@ -178,15 +191,6 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         const list = await studentService.fetchGuardiansSummary(tenantId);
         if (isMounted) {
           setAvailableGuardians(list);
-
-          // Se estiver editando e já tiver responsável vinculado, marcar como selecionado
-          if (guardianPersonToEdit) {
-            const found = list.find((g) => g.person.id === guardianPersonToEdit.id);
-            if (found) {
-              setSelectedExistingGuardian(found);
-              setGuardianMode('select_existing');
-            }
-          }
         }
       } catch (err) {
         console.warn('Erro ao carregar lista de responsáveis existentes:', err);
@@ -199,10 +203,87 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
     loadGuardians();
 
+    // Se estiver editando um aluno, carregar todos os relacionamentos de responsáveis dele do Supabase
+    if (studentToEdit) {
+      if (guardianPersonToEdit && guardianRelToEdit) {
+        setStudentExistingLinks([
+          {
+            id: guardianRelToEdit.id,
+            guardianPerson: guardianPersonToEdit,
+            relationship: guardianRelToEdit,
+          },
+        ]);
+        setHasGuardian(true);
+      }
+
+      if (isValidUUID(studentToEdit.id) && isSupabaseConfigured() && supabase) {
+        (async () => {
+          try {
+            const { data: rels } = await supabase
+              .from('guardian_relationships')
+              .select(`
+                id,
+                tenant_id,
+                student_id,
+                guardian_person_id,
+                relationship_label,
+                is_legal_guardian,
+                is_financial_guardian,
+                is_emergency_contact,
+                is_pickup_authorized,
+                notes,
+                person:persons (*)
+              `)
+              .eq('student_id', studentToEdit.id)
+              .eq('tenant_id', studentToEdit.tenantId || tenantId);
+
+            if (rels && rels.length > 0 && isMounted) {
+              const loaded = rels.map((r: any) => ({
+                id: r.id,
+                guardianPerson: {
+                  id: r.person?.id || r.guardian_person_id,
+                  tenantId: r.person?.tenant_id || tenantId,
+                  fullName: r.person?.full_name || 'Responsável',
+                  socialName: r.person?.social_name || undefined,
+                  cpf: r.person?.cpf || '',
+                  birthDate: r.person?.birth_date || '1985-01-01',
+                  gender: (r.person?.gender as any) || 'other',
+                  phone: r.person?.phone || '',
+                  email: r.person?.email || '',
+                  address: r.person?.address || {},
+                  createdAt: r.person?.created_at || new Date().toISOString(),
+                },
+                relationship: {
+                  id: r.id,
+                  tenantId: r.tenant_id,
+                  studentId: r.student_id,
+                  guardianPersonId: r.guardian_person_id,
+                  relationshipLabel: r.relationship_label || 'Responsável',
+                  isLegalGuardian: Boolean(r.is_legal_guardian),
+                  isFinancialGuardian: Boolean(r.is_financial_guardian),
+                  isEmergencyContact: Boolean(r.is_emergency_contact),
+                  isPickupAuthorized: Boolean(r.is_pickup_authorized),
+                  notes: r.notes,
+                },
+              }));
+              setStudentExistingLinks(loaded);
+              setHasGuardian(true);
+            }
+          } catch (err: any) {
+            console.warn('Erro ao consultar vínculos de responsáveis do aluno:', err);
+          }
+        })();
+      }
+    } else {
+      setStudentExistingLinks([]);
+      setRemovedLinkIds([]);
+      setIsAddingAdditionalGuardian(false);
+    }
+
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, guardianPersonToEdit]);
+  }, [isOpen, tenantId, guardianPersonToEdit, studentToEdit]);
 
   // 2. Carregar Modalidades Reais do Supabase vinculadas à academia ativa (tenant_id)
   useEffect(() => {
@@ -458,8 +539,23 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       .then((dupl) => {
         setIsCheckingStudentCpf(false);
         if (dupl.isDuplicate) {
+          if (!dupl.isStudent && dupl.existingPerson) {
+            // Auto-preencher dados da pessoa que já é responsável na academia
+            setFullName(dupl.existingPerson.fullName);
+            if (dupl.existingPerson.socialName) setSocialName(dupl.existingPerson.socialName);
+            if (dupl.existingPerson.phone) setPhone(dupl.existingPerson.phone);
+            if (dupl.existingPerson.email) setEmail(dupl.existingPerson.email);
+            if (dupl.existingPerson.birthDate) setBirthDate(dupl.existingPerson.birthDate);
+            if (dupl.existingPerson.gender) setGender(dupl.existingPerson.gender as any);
+            if (dupl.existingPerson.address?.city) setCity(dupl.existingPerson.address.city);
+            const age = calculateAge(dupl.existingPerson.birthDate);
+            if (age >= 18) {
+              setHasGuardian(false);
+            }
+          }
+
           setStudentCpfStatus({
-            isValid: !dupl.isStudent, // se for estudante já matriculado, bloqueia
+            isValid: !dupl.isStudent, // se for estudante já matriculado, bloqueia; se for responsável, permite matricular como aluno
             isDuplicate: true,
             duplicateMsg: dupl.message,
             existingPerson: dupl.existingPerson,
@@ -516,15 +612,63 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       .then((found) => {
         setIsCheckingGuardianCpf(false);
         if (found && found.person) {
+          // Auto-preencher automaticamente os dados cadastrais do responsável
+          setGuardianName(found.person.fullName);
+          if (found.person.phone) setGuardianPhone(found.person.phone);
+          if (found.person.email) setGuardianEmail(found.person.email);
+
+          setSelectedExistingGuardian({
+            person: found.person,
+            isStudent: found.isStudent,
+            studentProfile: found.student
+              ? {
+                  id: found.student.id,
+                  registrationNumber: found.student.registrationNumber,
+                  status: found.student.status,
+                  enrollmentDate: found.student.enrollmentDate,
+                }
+              : undefined,
+            dependents: (found.dependents || []).map((d: any) => ({
+              relationshipId: d.relationshipId || `rel-${Date.now()}`,
+              studentId: d.studentId,
+              relationshipLabel: d.relationshipLabel || 'Dependente',
+              isLegalGuardian: true,
+              isFinancialGuardian: true,
+              isEmergencyContact: true,
+              isPickupAuthorized: true,
+              studentRegistrationNumber: d.studentRegistrationNumber || 'MAT',
+              studentStatus: d.studentStatus || 'active',
+              studentPerson: {
+                id: d.studentId,
+                tenantId,
+                fullName: d.studentName || 'Aluno',
+                cpf: '',
+                birthDate: '2010-01-01',
+                gender: 'male' as const,
+                phone: '',
+                email: '',
+                address: {
+                  street: '',
+                  number: '',
+                  neighborhood: '',
+                  city: '',
+                  state: '',
+                  zipCode: '',
+                },
+                createdAt: new Date().toISOString(),
+              },
+            })),
+          });
+
           setGuardianCpfStatus({
             isValid: true,
             isDuplicate: true,
             existingPerson: found.person,
             isStudent: found.isStudent,
             dependentsCount: found.dependentsCount,
-            duplicateMsg: `Pessoa já cadastrada no Dojo: ${found.person.fullName}${
-              found.isStudent ? ' (Aluno Matriculado)' : ''
-            }`,
+            duplicateMsg: `Responsável localizado no Dojo: ${found.person.fullName}${
+              found.isStudent ? ' (Também é Aluno Matriculado)' : ''
+            }. Dados preenchidos automaticamente.`,
           });
         } else {
           setGuardianCpfStatus({
@@ -580,8 +724,16 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       return;
     }
 
-    // Validação matemática do CPF do Aluno (se informado)
     const cleanStudentCpf = cleanCPF(cpf);
+    const studentAgeAtSave = calculateAge(birthDate);
+
+    // O CPF é obrigatório para alunos maiores de 18 anos
+    if (studentAgeAtSave >= 18 && !cleanStudentCpf) {
+      setError('O CPF é obrigatório para alunos maiores de 18 anos.');
+      return;
+    }
+
+    // Validação matemática do CPF do Aluno (se informado)
     if (cleanStudentCpf) {
       const val = validateCPF(cleanStudentCpf);
       if (!val.isValid) {
@@ -607,6 +759,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           return;
         }
         const cleanGrdCpf = cleanCPF(guardianCpf);
+        if (!cleanGrdCpf && !selectedExistingGuardian) {
+          setError('O CPF do responsável é obrigatório para garantir o controle de vínculos e evitar cadastros duplicados.');
+          return;
+        }
         if (cleanGrdCpf) {
           const valG = validateCPF(cleanGrdCpf);
           if (!valG.isValid) {
@@ -688,7 +844,23 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       let updatedGuardianPerson: Person | undefined = undefined;
       let updatedRelationship: GuardianRelationship | undefined = undefined;
 
-      if (hasGuardian && guardianName.trim()) {
+      // 1. Processar exclusão explícita de vínculos removidos pelo usuário
+      if (removedLinkIds.length > 0 && isSupabaseConfigured() && supabase) {
+        for (const rId of removedLinkIds) {
+          try {
+            await supabase.from('guardian_relationships').delete().eq('id', rId);
+          } catch (rErr) {
+            console.warn('Aviso ao remover vínculo de responsável no Supabase:', rErr);
+          }
+        }
+      }
+
+      // 2. Determinar responsável ativo (novo preenchido ou existente mantido)
+      const hasNewGuardianData = Boolean(hasGuardian && guardianName.trim());
+      const hasExistingLinks = studentExistingLinks.length > 0;
+      const effectiveHasGuardian = hasGuardian && (hasNewGuardianData || hasExistingLinks);
+
+      if (hasNewGuardianData) {
         const gId = effectiveReusedGuardianPersonId || guardianPersonToEdit?.id || `person-g-${Date.now()}`;
         updatedGuardianPerson = {
           id: gId,
@@ -714,6 +886,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           isEmergencyContact: true,
           isPickupAuthorized: true,
         };
+      } else if (hasExistingLinks) {
+        // Mantém com total integridade o responsável que já estava vinculado
+        updatedGuardianPerson = studentExistingLinks[0].guardianPerson;
+        updatedRelationship = studentExistingLinks[0].relationship;
       }
 
       const effectiveTenantId = isValidUUID(studentToEdit?.tenantId) ? studentToEdit.tenantId : tenantId;
@@ -738,15 +914,15 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         beltRankId: selectedBeltId,
         selectedArt: chosenArt,
         selectedBelt: chosenBelt,
-        hasGuardian,
-        guardianPersonId: effectiveReusedGuardianPersonId || guardianPersonToEdit?.id,
-        reusedGuardianPersonId: effectiveReusedGuardianPersonId,
-        guardianRelId: guardianRelToEdit?.id,
-        guardianName: guardianName.trim(),
-        guardianCpf: normalizedGuardianCpf,
-        guardianPhone,
-        guardianEmail,
-        relationshipType,
+        hasGuardian: effectiveHasGuardian,
+        guardianPersonId: updatedGuardianPerson?.id,
+        reusedGuardianPersonId: effectiveReusedGuardianPersonId || updatedGuardianPerson?.id,
+        guardianRelId: updatedRelationship?.id,
+        guardianName: updatedGuardianPerson?.fullName || guardianName.trim(),
+        guardianCpf: updatedGuardianPerson?.cpf || normalizedGuardianCpf,
+        guardianPhone: updatedGuardianPerson?.phone || guardianPhone,
+        guardianEmail: updatedGuardianPerson?.email || guardianEmail,
+        relationshipType: updatedRelationship?.relationshipLabel || relationshipType,
       };
 
       try {
@@ -1226,37 +1402,99 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
             {hasGuardian && (
               <div className="space-y-3 pt-2">
-                {/* Abas de Escolha do Responsável: Reutilizar Existente vs. Novo Cadastro */}
-                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-                  <button
-                    type="button"
-                    onClick={() => setGuardianMode('select_existing')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                      guardianMode === 'select_existing'
-                        ? 'bg-red-600 text-white shadow'
-                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                    }`}
-                  >
-                    <UserCheck className="h-3.5 w-3.5" />
-                    <span>Selecionar Responsável Existente ({availableGuardians.length})</span>
-                  </button>
+                {/* 1. SE EXISTIREM VÍNCULOS JÁ CADASTRADOS (MODO EDIÇÃO) */}
+                {isEditing && studentExistingLinks.length > 0 && (
+                  <div className="p-3 rounded-xl border border-slate-700 bg-slate-900/90 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                        <span>Responsáveis Vinculados ao Aluno ({studentExistingLinks.length})</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingAdditionalGuardian(!isAddingAdditionalGuardian)}
+                        className="text-[11px] font-semibold text-red-400 hover:text-red-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="h-3 w-3" />
+                        <span>{isAddingAdditionalGuardian ? 'Ocultar Novo Vínculo' : 'Vincular Outro Responsável'}</span>
+                      </button>
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGuardianMode('create_new');
-                      setSelectedExistingGuardian(null);
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                      guardianMode === 'create_new'
-                        ? 'bg-red-600 text-white shadow'
-                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                    }`}
-                  >
-                    <UserPlus className="h-3.5 w-3.5" />
-                    <span>Cadastrar Novo Responsável</span>
-                  </button>
-                </div>
+                    <div className="space-y-1.5 pt-1">
+                      {studentExistingLinks.map((link) => (
+                        <div
+                          key={link.id}
+                          className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-xs"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white">{link.guardianPerson.fullName}</span>
+                              <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">
+                                {link.relationship.relationshipLabel}
+                              </span>
+                              <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                                Gravado no Banco ✓
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex gap-2">
+                              <span>CPF: {formatCPF(link.guardianPerson.cpf) || 'Sem CPF'}</span>
+                              <span>·</span>
+                              <span>{formatPhoneBR(link.guardianPerson.phone)}</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRemovedLinkIds((prev) => [...prev, link.id]);
+                              setStudentExistingLinks((prev) => prev.filter((l) => l.id !== link.id));
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-red-950/80 text-slate-400 hover:text-red-300 border border-slate-700 transition-colors text-[10px] cursor-pointer"
+                            title="Remover este vínculo do aluno"
+                          >
+                            <Trash2 className="h-3 w-3 text-red-400" />
+                            <span>Remover Vínculo</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. ÁREA DE SELEÇÃO OU CADASTRO DE RESPONSÁVEL */}
+                {(!isEditing || studentExistingLinks.length === 0 || isAddingAdditionalGuardian) && (
+                  <>
+                    {/* Abas de Escolha do Responsável: Reutilizar Existente vs. Novo Cadastro */}
+                    <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                      <button
+                        type="button"
+                        onClick={() => setGuardianMode('select_existing')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          guardianMode === 'select_existing'
+                            ? 'bg-red-600 text-white shadow'
+                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        <UserCheck className="h-3.5 w-3.5" />
+                        <span>Selecionar Responsável Existente ({availableGuardians.length})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGuardianMode('create_new');
+                          setSelectedExistingGuardian(null);
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          guardianMode === 'create_new'
+                            ? 'bg-red-600 text-white shadow'
+                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        <span>Cadastrar Novo Responsável</span>
+                      </button>
+                    </div>
 
                 {/* MODO 1: SELECIONAR RESPONSÁVEL EXISTENTE NA ACADEMIA */}
                 {guardianMode === 'select_existing' && (
@@ -1486,8 +1724,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                     <option value="Outro">Outro Representante</option>
                   </select>
                 </div>
-              </div>
+              </>
             )}
+          </div>
+        )}
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-3">

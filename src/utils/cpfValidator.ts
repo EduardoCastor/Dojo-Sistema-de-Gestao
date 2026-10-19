@@ -114,3 +114,6 @@ export function maskCPFInput(value: string): string {
   if (clean.length <= 9) return clean.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
   return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
 }
+
+export { formatPhoneBR, formatDateBR } from './formatters';
+

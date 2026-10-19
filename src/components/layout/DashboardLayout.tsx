@@ -19,12 +19,14 @@ import {
   ArrowRightLeft,
   Menu,
   X,
+  UserCheck,
 } from 'lucide-react';
 import { User, Tenant, Branch } from '../../types';
 
 export type AdminViewTab =
   | 'overview'
   | 'students'
+  | 'guardians'
   | 'modalities'
   | 'classes'
   | 'attendance'
@@ -78,7 +80,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
   const navItems: { id: AdminViewTab; label: string; icon: React.ElementType; allowedRoles?: User['role'][] }[] = [
     { id: 'overview', label: 'Visão Geral', icon: LayoutDashboard },
-    { id: 'students', label: 'Alunos & Responsáveis', icon: Users },
+    { id: 'students', label: 'Alunos', icon: Users },
+    { id: 'guardians', label: 'Responsáveis', icon: UserCheck },
     { id: 'modalities', label: 'Modalidades & Faixas', icon: Award },
     { id: 'classes', label: 'Turmas & Horários', icon: Calendar },
     { id: 'attendance', label: 'Controle de Frequência', icon: CheckSquare },

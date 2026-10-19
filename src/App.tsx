@@ -40,6 +40,7 @@ import { LoginModal } from './components/public/LoginModal';
 // Admin Views
 import { OverviewDashboard } from './components/admin/OverviewDashboard';
 import { StudentsView } from './components/admin/StudentsView';
+import { GuardiansView } from './components/admin/GuardiansView';
 import { StudentFormModal } from './components/admin/StudentFormModal';
 import { ModalitiesView } from './components/admin/ModalitiesView';
 import { ClassesView } from './components/admin/ClassesView';
@@ -177,6 +178,30 @@ export default function App() {
       isMounted = false;
     };
   }, [currentTenantId]);
+
+  const handleRefreshStudents = async () => {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(currentTenantId)) {
+      return;
+    }
+    setIsLoadingStudents(true);
+    try {
+      const result = await studentService.fetchStudentsWithDetails(currentTenantId);
+      if (result) {
+        setStudents(result.students);
+        setPersons((prev) => {
+          const nonStudentPersons = prev.filter(
+            (p) => !result.persons.some((rp) => rp.id === p.id)
+          );
+          return [...result.persons, ...nonStudentPersons];
+        });
+        setGuardians(result.guardians);
+      }
+    } catch (err) {
+      console.warn('Erro ao atualizar dados do banco:', err);
+    } finally {
+      setIsLoadingStudents(false);
+    }
+  };
 
   const fallbackTenant: Tenant = {
     id: currentTenantId || 'tenant-kodokan',
@@ -1083,6 +1108,22 @@ export default function App() {
               tenantId={currentTenantId}
               onOpenCreateStudent={handleOpenCreateStudent}
               onEditStudent={handleOpenEditStudent}
+              onUpdatePerson={handleUpdatePerson}
+            />
+          )}
+
+          {adminTab === 'guardians' && (
+            <GuardiansView
+              tenantId={currentTenantId}
+              guardians={guardians}
+              persons={persons}
+              students={students}
+              isLoading={isLoadingStudents}
+              error={null}
+              onRefreshData={handleRefreshStudents}
+              onOpenStudentDetail={(student) => {
+                handleOpenEditStudent(student);
+              }}
               onUpdatePerson={handleUpdatePerson}
             />
           )}
