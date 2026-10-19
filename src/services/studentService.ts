@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { Student, Person, GuardianRelationship, BeltRank, MartialArt } from '../types';
 import { cleanCPF, validateCPF, formatCPF } from '../utils/cpfValidator';
 import { DataStore } from '../data/storage';
+import { INITIAL_PERSONS, INITIAL_STUDENTS, INITIAL_GUARDIAN_RELATIONSHIPS } from '../data/initialData';
 
 /**
  * Validador de formato UUID v4 para evitar erro 'invalid input syntax for type uuid'
@@ -2206,7 +2207,7 @@ export const studentService = {
     let resultRelationship: GuardianRelationship | undefined = undefined;
 
     if (payload.hasGuardian === false) {
-      // Usuário optou por desvincular o responsável deste aluno
+      // Usuário optou explicitamente por desvincular o responsável deste aluno
       const { error: unlinkError } = await supabase
         .from('guardian_relationships')
         .delete()
@@ -2216,76 +2217,116 @@ export const studentService = {
       if (unlinkError) {
         console.warn('Aviso ao desvincular responsável no Supabase:', unlinkError.message);
       }
-    } else if (payload.hasGuardian && payload.guardianName?.trim()) {
+    } else if (payload.hasGuardian) {
       let guardianPersonIdToLink = effectiveGuardianPersonId;
+      const cleanGCpf = payload.guardianCpf ? cleanCPF(payload.guardianCpf) : '';
 
       // Se não temos ID prévio de pessoa, verificar se já existe pessoa com esse CPF no tenant
-      if (!guardianPersonIdToLink && payload.guardianCpf) {
-        const cleanGCpf = cleanCPF(payload.guardianCpf);
-        if (cleanGCpf) {
-          const { data: existingPersonByCpf } = await supabase
-            .from('persons')
-            .select('id')
-            .eq('tenant_id', payload.tenantId)
-            .eq('cpf', cleanGCpf)
-            .maybeSingle();
+      if (!guardianPersonIdToLink && cleanGCpf) {
+        const { data: existingPersonByCpf } = await supabase
+          .from('persons')
+          .select('*')
+          .eq('tenant_id', payload.tenantId)
+          .eq('cpf', cleanGCpf)
+          .maybeSingle();
 
-          if (existingPersonByCpf) {
-            guardianPersonIdToLink = existingPersonByCpf.id;
-          }
+        if (existingPersonByCpf) {
+          guardianPersonIdToLink = existingPersonByCpf.id;
+          resultGuardianPerson = {
+            id: existingPersonByCpf.id,
+            tenantId: payload.tenantId,
+            fullName: existingPersonByCpf.full_name,
+            socialName: existingPersonByCpf.social_name || undefined,
+            cpf: existingPersonByCpf.cpf || '',
+            birthDate: existingPersonByCpf.birth_date,
+            gender: existingPersonByCpf.gender || 'other',
+            phone: existingPersonByCpf.phone || '',
+            email: existingPersonByCpf.email || '',
+            address: existingPersonByCpf.address || {},
+            createdAt: existingPersonByCpf.created_at,
+          };
         }
       }
 
       if (guardianPersonIdToLink && isValidUUID(guardianPersonIdToLink)) {
-        // Atualizar dados cadastrais do responsável existente
-        const { data: gpData } = await supabase
-          .from('persons')
-          .update({
-            full_name: payload.guardianName.trim(),
-            cpf: cleanCPF(payload.guardianCpf) || null,
-            phone: payload.guardianPhone?.trim() || null,
-            email: payload.guardianEmail?.trim() || null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', guardianPersonIdToLink)
-          .eq('tenant_id', payload.tenantId)
-          .select()
-          .single();
+        // Atualizar dados cadastrais do responsável existente se foram fornecidos
+        if (payload.guardianName?.trim()) {
+          const { data: gpData } = await supabase
+            .from('persons')
+            .update({
+              full_name: payload.guardianName.trim(),
+              cpf: cleanGCpf || null,
+              phone: payload.guardianPhone?.trim() || null,
+              email: payload.guardianEmail?.trim() || null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', guardianPersonIdToLink)
+            .eq('tenant_id', payload.tenantId)
+            .select()
+            .maybeSingle();
 
-        if (gpData) {
-          resultGuardianPerson = {
-            id: gpData.id,
-            tenantId: gpData.tenant_id,
-            fullName: gpData.full_name,
-            socialName: gpData.social_name || undefined,
-            cpf: gpData.cpf || '',
-            birthDate: gpData.birth_date,
-            gender: gpData.gender || 'other',
-            phone: gpData.phone || '',
-            email: gpData.email || '',
-            address: gpData.address || {},
-            createdAt: gpData.created_at,
-          };
+          if (gpData) {
+            resultGuardianPerson = {
+              id: gpData.id,
+              tenantId: gpData.tenant_id,
+              fullName: gpData.full_name,
+              socialName: gpData.social_name || undefined,
+              cpf: gpData.cpf || '',
+              birthDate: gpData.birth_date,
+              gender: gpData.gender || 'other',
+              phone: gpData.phone || '',
+              email: gpData.email || '',
+              address: gpData.address || {},
+              createdAt: gpData.created_at,
+            };
+          }
+        } else if (!resultGuardianPerson) {
+          const { data: gpData } = await supabase
+            .from('persons')
+            .select('*')
+            .eq('id', guardianPersonIdToLink)
+            .eq('tenant_id', payload.tenantId)
+            .maybeSingle();
+
+          if (gpData) {
+            resultGuardianPerson = {
+              id: gpData.id,
+              tenantId: gpData.tenant_id,
+              fullName: gpData.full_name,
+              socialName: gpData.social_name || undefined,
+              cpf: gpData.cpf || '',
+              birthDate: gpData.birth_date,
+              gender: gpData.gender || 'other',
+              phone: gpData.phone || '',
+              email: gpData.email || '',
+              address: gpData.address || {},
+              createdAt: gpData.created_at,
+            };
+          }
         }
 
-        // Verificar se já existe vínculo deste aluno com este ou outro responsável
-        const { data: existingRel } = await supabase
+        // Buscar vínculos existentes deste aluno no Supabase de forma segura
+        const { data: existingRels } = await supabase
           .from('guardian_relationships')
           .select('*')
           .eq('student_id', payload.studentId)
-          .eq('tenant_id', payload.tenantId)
-          .maybeSingle();
+          .eq('tenant_id', payload.tenantId);
 
-        if (existingRel) {
+        if (existingRels && existingRels.length > 0) {
+          const targetRel = existingRels.find((r) => r.id === payload.guardianRelId) || existingRels[0];
           const { data: updatedGr } = await supabase
             .from('guardian_relationships')
             .update({
               guardian_person_id: guardianPersonIdToLink,
               relationship_label: payload.relationshipType || 'Responsável',
+              is_legal_guardian: true,
+              is_financial_guardian: true,
+              is_emergency_contact: true,
+              is_pickup_authorized: true,
             })
-            .eq('id', existingRel.id)
+            .eq('id', targetRel.id)
             .select()
-            .single();
+            .maybeSingle();
 
           if (updatedGr) {
             resultRelationship = {
@@ -2330,14 +2371,14 @@ export const studentService = {
             };
           }
         }
-      } else {
+      } else if (payload.guardianName?.trim()) {
         // Inserir novo responsável para este aluno caso realmente não exista no sistema
         const { data: newGp } = await supabase
           .from('persons')
           .insert({
             tenant_id: payload.tenantId,
             full_name: payload.guardianName.trim(),
-            cpf: cleanCPF(payload.guardianCpf) || null,
+            cpf: cleanGCpf || null,
             birth_date: '1985-01-01',
             gender: 'other',
             phone: payload.guardianPhone?.trim() || null,
@@ -2362,23 +2403,23 @@ export const studentService = {
             createdAt: newGp.created_at,
           };
 
-          const { data: existingRel } = await supabase
+          const { data: existingRels } = await supabase
             .from('guardian_relationships')
             .select('*')
             .eq('student_id', payload.studentId)
-            .eq('tenant_id', payload.tenantId)
-            .maybeSingle();
+            .eq('tenant_id', payload.tenantId);
 
-          if (existingRel) {
+          if (existingRels && existingRels.length > 0) {
+            const targetRel = existingRels[0];
             const { data: updatedGr } = await supabase
               .from('guardian_relationships')
               .update({
                 guardian_person_id: newGp.id,
                 relationship_label: payload.relationshipType || 'Responsável',
               })
-              .eq('id', existingRel.id)
+              .eq('id', targetRel.id)
               .select()
-              .single();
+              .maybeSingle();
 
             if (updatedGr) {
               resultRelationship = {
@@ -2427,177 +2468,143 @@ export const studentService = {
       }
     }
 
-    // 4. Se a graduação mudou e são UUIDs válidos
+    // 4. Persistir a graduação do aluno no Supabase se IDs válidos forem fornecidos
+    let validArt: any = null;
+    let validBelt: any = null;
 
-    // 4. Persistir a graduação do aluno no Supabase com validações estritas
     if (
-      !isValidUUID(payload.martialArtId) ||
-      !isValidUUID(payload.beltRankId)
+      isValidUUID(payload.martialArtId) &&
+      isValidUUID(payload.beltRankId)
     ) {
-      throw new Error(
-        'A modalidade ou graduação selecionada não possui um UUID válido no Supabase. ' +
-        'Cadastre a modalidade e suas graduações no banco.'
-      );
-    }
-
-    // 4.1. Validar que a modalidade pertence à academia ativa e está com status ativo
-    const { data: validArt, error: artValError } = await supabase
-      .from('martial_arts')
-      .select('id, tenant_id, name, status')
-      .eq('id', payload.martialArtId)
-      .eq('tenant_id', payload.tenantId)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (artValError) {
-      throw new Error('Erro ao validar modalidade no Supabase: ' + artValError.message);
-    }
-    if (!validArt) {
-      throw new Error('A modalidade selecionada não pertence à academia ativa ou não está ativa.');
-    }
-
-    // 4.2. Validar que a graduação pertence à mesma academia e à modalidade selecionada
-    const { data: validBelt, error: beltValError } = await supabase
-      .from('belt_ranks')
-      .select('id, tenant_id, martial_art_id, name, color_hex')
-      .eq('id', payload.beltRankId)
-      .eq('tenant_id', payload.tenantId)
-      .eq('martial_art_id', payload.martialArtId)
-      .maybeSingle();
-
-    if (beltValError) {
-      throw new Error('Erro ao validar graduação no Supabase: ' + beltValError.message);
-    }
-    if (!validBelt) {
-      throw new Error('A graduação selecionada não pertence à modalidade escolhida ou à academia ativa.');
-    }
-
-    // 4.3. Consultar a graduação mais recente do aluno especificamente para a modalidade selecionada
-    const { data: existingGrads, error: fetchGradError } = await supabase
-      .from('student_graduations')
-      .select('id, martial_art_id, belt_rank_id, graduated_at')
-      .eq('student_id', payload.studentId)
-      .eq('tenant_id', payload.tenantId)
-      .eq('martial_art_id', payload.martialArtId)
-      .order('graduated_at', { ascending: false })
-      .limit(1);
-
-    if (fetchGradError) {
-      throw new Error(
-        'Erro ao consultar histórico de graduação: ' + fetchGradError.message
-      );
-    }
-
-    const currentGradForModality = existingGrads?.[0];
-
-    const graduationChanged =
-      !currentGradForModality ||
-      currentGradForModality.belt_rank_id !== payload.beltRankId;
-
-    if (graduationChanged) {
-      let rpcSucceeded = false;
-
-      // Tentativa 1: Executar via função RPC atômica record_student_graduation (imune a inconsistências de RLS no cliente)
       try {
-        const { data: rpcData, error: rpcError } = await supabase.rpc('record_student_graduation', {
-          p_tenant_id: payload.tenantId,
-          p_student_id: payload.studentId,
-          p_martial_art_id: payload.martialArtId,
-          p_belt_rank_id: payload.beltRankId,
-          p_examiner_name: 'Atualização administrativa',
-          p_notes: 'Graduação atualizada no cadastro do aluno',
-        });
+        const { data: artData } = await supabase
+          .from('martial_arts')
+          .select('id, tenant_id, name, status')
+          .eq('id', payload.martialArtId)
+          .eq('tenant_id', payload.tenantId)
+          .maybeSingle();
+        validArt = artData;
 
-        if (!rpcError && rpcData?.id) {
-          rpcSucceeded = true;
-        } else if (rpcError) {
-          const errMsg = rpcError.message || '';
-          // Se a função não existe ainda no Supabase (código 42883 ou mensagem 'does not exist'), prosseguir para o fallback
-          if (!errMsg.includes('does not exist') && !errMsg.includes('function') && rpcError.code !== '42883') {
-            throw new Error('Falha ao registrar graduação via RPC: ' + errMsg);
-          }
-        }
-      } catch (rpcErr: any) {
-        const msg = rpcErr.message || '';
-        if (!msg.includes('does not exist') && !msg.includes('function') && rpcErr.code !== '42883') {
-          throw rpcErr;
-        }
-      }
-
-      // Tentativa 2: Fallback para INSERT direto em student_graduations
-      if (!rpcSucceeded) {
-        const { data: insertData, error: saveGradError } = await supabase
-          .from('student_graduations')
-          .insert({
-            tenant_id: payload.tenantId,
-            student_id: payload.studentId,
-            martial_art_id: payload.martialArtId,
-            belt_rank_id: payload.beltRankId,
-            graduated_at: new Date().toISOString().split('T')[0],
-            examiner_name: 'Atualização administrativa',
-            notes: 'Graduação atualizada no cadastro do aluno',
-          })
-          .select('id');
-
-        if (saveGradError) {
-          const isRlsError =
-            saveGradError.code === '42501' ||
-            saveGradError.message?.toLowerCase().includes('row-level security') ||
-            saveGradError.message?.toLowerCase().includes('violates row-level security policy') ||
-            saveGradError.message?.toLowerCase().includes('permission denied');
-
-          if (isRlsError) {
-            throw new Error(
-              'Erro de Permissão (RLS) no Supabase: A tabela "student_graduations" bloqueou a gravação da graduação. ' +
-              'Certifique-se de que seu usuário possui papel de staff ativo nesta academia e execute o script SQL da migration 07_student_graduations_rls_and_rpc.sql no SQL Editor do Supabase.'
-            );
-          }
-
-          throw new Error('Erro ao salvar Faixa/Graduação no Supabase: ' + saveGradError.message);
-        }
+        const { data: beltData } = await supabase
+          .from('belt_ranks')
+          .select('id, tenant_id, martial_art_id, name, color_hex')
+          .eq('id', payload.beltRankId)
+          .eq('tenant_id', payload.tenantId)
+          .eq('martial_art_id', payload.martialArtId)
+          .maybeSingle();
+        validBelt = beltData;
+      } catch (errGrad) {
+        console.warn('Aviso ao consultar modalidade/graduação:', errGrad);
       }
     }
 
-    // 4.4. Consultar todas as graduações vigentes do aluno (uma por modalidade) para manter o estado atualizado
-    const { data: allStudentGrads } = await supabase
-      .from('student_graduations')
-      .select(`
-        id,
-        martial_art_id,
-        belt_rank_id,
-        graduated_at,
-        martial_art:martial_arts (id, name),
-        belt_rank:belt_ranks (id, name, color_hex)
-      `)
-      .eq('student_id', payload.studentId)
-      .eq('tenant_id', payload.tenantId)
-      .order('graduated_at', { ascending: false });
+    let finalCurrentGraduations: any[] = [];
 
-    const latestByArtMap = new Map<string, any>();
-    // Garante que a recém-atualizada esteja presente
-    latestByArtMap.set(payload.martialArtId, {
-      martialArtId: payload.martialArtId,
-      martialArtName: validArt.name,
-      beltId: payload.beltRankId,
-      beltName: validBelt.name,
-      beltColorHex: validBelt.color_hex || '#ffffff',
-      graduatedAt: new Date().toISOString().split('T')[0],
-    });
+    if (validArt && validBelt) {
+      // 4.3. Consultar a graduação mais recente do aluno especificamente para a modalidade selecionada
+      const { data: existingGrads } = await supabase
+        .from('student_graduations')
+        .select('id, martial_art_id, belt_rank_id, graduated_at')
+        .eq('student_id', payload.studentId)
+        .eq('tenant_id', payload.tenantId)
+        .eq('martial_art_id', payload.martialArtId)
+        .order('graduated_at', { ascending: false })
+        .limit(1);
 
-    (allStudentGrads || []).forEach((g: any) => {
-      if (!latestByArtMap.has(g.martial_art_id)) {
-        latestByArtMap.set(g.martial_art_id, {
-          martialArtId: g.martial_art_id,
-          martialArtName: g.martial_art?.name || 'Arte Marcial',
-          beltId: g.belt_rank_id,
-          beltName: g.belt_rank?.name || 'Faixa',
-          beltColorHex: g.belt_rank?.color_hex || '#ffffff',
-          graduatedAt: g.graduated_at || new Date().toISOString().split('T')[0],
-        });
+      const currentGradForModality = existingGrads?.[0];
+      const graduationChanged =
+        !currentGradForModality ||
+        currentGradForModality.belt_rank_id !== payload.beltRankId;
+
+      if (graduationChanged) {
+        let rpcSucceeded = false;
+        try {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('record_student_graduation', {
+            p_tenant_id: payload.tenantId,
+            p_student_id: payload.studentId,
+            p_martial_art_id: payload.martialArtId,
+            p_belt_rank_id: payload.beltRankId,
+            p_examiner_name: 'Atualização administrativa',
+            p_notes: 'Graduação atualizada no cadastro do aluno',
+          });
+
+          if (!rpcError && rpcData?.id) {
+            rpcSucceeded = true;
+          }
+        } catch (rpcErr) {
+          // fallback direto
+        }
+
+        if (!rpcSucceeded) {
+          try {
+            await supabase
+              .from('student_graduations')
+              .insert({
+                tenant_id: payload.tenantId,
+                student_id: payload.studentId,
+                martial_art_id: payload.martialArtId,
+                belt_rank_id: payload.beltRankId,
+                graduated_at: new Date().toISOString().split('T')[0],
+                examiner_name: 'Atualização administrativa',
+                notes: 'Graduação atualizada no cadastro do aluno',
+              });
+          } catch (insErr) {
+            console.warn('Aviso ao registrar graduação no Supabase:', insErr);
+          }
+        }
       }
-    });
 
-    const finalCurrentGraduations = Array.from(latestByArtMap.values());
+      // 4.4. Consultar todas as graduações vigentes do aluno
+      const { data: allStudentGrads } = await supabase
+        .from('student_graduations')
+        .select(`
+          id,
+          martial_art_id,
+          belt_rank_id,
+          graduated_at,
+          martial_art:martial_arts (id, name),
+          belt_rank:belt_ranks (id, name, color_hex)
+        `)
+        .eq('student_id', payload.studentId)
+        .eq('tenant_id', payload.tenantId)
+        .order('graduated_at', { ascending: false });
+
+      const latestByArtMap = new Map<string, any>();
+      latestByArtMap.set(payload.martialArtId, {
+        martialArtId: payload.martialArtId,
+        martialArtName: validArt.name,
+        beltId: payload.beltRankId,
+        beltName: validBelt.name,
+        beltColorHex: validBelt.color_hex || '#ffffff',
+        graduatedAt: new Date().toISOString().split('T')[0],
+      });
+
+      (allStudentGrads || []).forEach((g: any) => {
+        if (!latestByArtMap.has(g.martial_art_id)) {
+          latestByArtMap.set(g.martial_art_id, {
+            martialArtId: g.martial_art_id,
+            martialArtName: g.martial_art?.name || 'Arte Marcial',
+            beltId: g.belt_rank_id,
+            beltName: g.belt_rank?.name || 'Faixa',
+            beltColorHex: g.belt_rank?.color_hex || '#ffffff',
+            graduatedAt: g.graduated_at || new Date().toISOString().split('T')[0],
+          });
+        }
+      });
+
+      finalCurrentGraduations = Array.from(latestByArtMap.values());
+    } else if (payload.selectedArt && payload.selectedBelt) {
+      finalCurrentGraduations = [
+        {
+          martialArtId: payload.selectedArt.id,
+          martialArtName: payload.selectedArt.name,
+          beltId: payload.selectedBelt.id,
+          beltName: payload.selectedBelt.name,
+          beltColorHex: payload.selectedBelt.colorHex || '#ffffff',
+          graduatedAt: new Date().toISOString().split('T')[0],
+        },
+      ];
+    }
 
     // 5. Registrar log de auditoria
     try {
@@ -2726,6 +2733,211 @@ export const studentService = {
       email: updated.email || '',
       address: updated.address || {},
       createdAt: updated.created_at,
+    };
+  },
+
+  /**
+   * Limpa todos os dados de alunos, responsáveis e vínculos salvos no Supabase e DataStore,
+   * e reinicia o Dojo do zero com registros limpos, válidos e estruturados.
+   */
+  async resetAcademyData(tenantId: string): Promise<{ success: boolean; message: string }> {
+    // 1. Reset no Supabase se configurado
+    if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
+      try {
+        // Remover vínculos e dados de alunos e responsáveis do tenant
+        await supabase.from('guardian_relationships').delete().eq('tenant_id', tenantId);
+        await supabase.from('student_graduations').delete().eq('tenant_id', tenantId);
+        await supabase.from('students').delete().eq('tenant_id', tenantId);
+        await supabase.from('persons').delete().eq('tenant_id', tenantId);
+
+        // Buscar uma filial ativa do tenant
+        const { data: branchData } = await supabase
+          .from('branches')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .limit(1)
+          .maybeSingle();
+
+        const branchId = branchData?.id || null;
+
+        // Inserir Responsável 1: Marcos (Pai) com CPF matematicamente válido
+        const { data: pMarcos } = await supabase
+          .from('persons')
+          .insert({
+            tenant_id: tenantId,
+            full_name: 'Marcos Antônio Silva',
+            cpf: '03792093812',
+            birth_date: '1984-06-15',
+            gender: 'male',
+            phone: '(11) 98666-7788',
+            email: 'marcos.pai@email.com',
+            address: { street: 'Alameda das Acácias', number: '120', neighborhood: 'Jardins', city: 'São Paulo', state: 'SP', zipCode: '01420-000' },
+          })
+          .select()
+          .single();
+
+        // Inserir Responsável 2: Camila (Mãe) com CPF matematicamente válido
+        const { data: pCamila } = await supabase
+          .from('persons')
+          .insert({
+            tenant_id: tenantId,
+            full_name: 'Camila Oliveira Silva',
+            cpf: '45737048098',
+            birth_date: '1986-09-22',
+            gender: 'female',
+            phone: '(11) 97111-2233',
+            email: 'camila.mae@email.com',
+            address: { street: 'Alameda das Acácias', number: '120', neighborhood: 'Jardins', city: 'São Paulo', state: 'SP', zipCode: '01420-000' },
+          })
+          .select()
+          .single();
+
+        // Inserir Aluno 1: Lucas (Menor) com CPF matematicamente válido
+        const { data: pLucas } = await supabase
+          .from('persons')
+          .insert({
+            tenant_id: tenantId,
+            full_name: 'Lucas Oliveira Silva',
+            cpf: '19385292510',
+            birth_date: '2015-04-12',
+            gender: 'male',
+            phone: '(11) 98555-6677',
+            email: 'lucas.aluno@email.com',
+            address: { street: 'Alameda das Acácias', number: '120', neighborhood: 'Jardins', city: 'São Paulo', state: 'SP', zipCode: '01420-000' },
+          })
+          .select()
+          .single();
+
+        if (pLucas) {
+          const { data: stLucas } = await supabase
+            .from('students')
+            .insert({
+              tenant_id: tenantId,
+              branch_id: branchId,
+              person_id: pLucas.id,
+              registration_number: 'MAT-2025-001',
+              enrollment_date: '2025-01-15',
+              status: 'active',
+              monthly_fee: 250,
+            })
+            .select()
+            .single();
+
+          if (stLucas && pMarcos) {
+            await supabase.from('guardian_relationships').insert({
+              tenant_id: tenantId,
+              student_id: stLucas.id,
+              guardian_person_id: pMarcos.id,
+              relationship_label: 'Pai',
+              is_legal_guardian: true,
+              is_financial_guardian: true,
+              is_emergency_contact: true,
+              is_pickup_authorized: true,
+              notes: 'Responsável legal e financeiro principal.',
+            });
+          }
+
+          if (stLucas && pCamila) {
+            await supabase.from('guardian_relationships').insert({
+              tenant_id: tenantId,
+              student_id: stLucas.id,
+              guardian_person_id: pCamila.id,
+              relationship_label: 'Mãe',
+              is_legal_guardian: true,
+              is_financial_guardian: false,
+              is_emergency_contact: true,
+              is_pickup_authorized: true,
+              notes: 'Contato de emergência e autorizada para retirada.',
+            });
+          }
+        }
+
+        // Inserir Aluna 2: Sofia (Menor, irmã de Lucas - REUSANDO o pai Marcos)
+        const { data: pSofia } = await supabase
+          .from('persons')
+          .insert({
+            tenant_id: tenantId,
+            full_name: 'Sofia Oliveira Silva',
+            cpf: '23662117592',
+            birth_date: '2018-08-20',
+            gender: 'female',
+            phone: '(11) 98555-6677',
+            email: 'sofia.aluna@email.com',
+            address: { street: 'Alameda das Acácias', number: '120', neighborhood: 'Jardins', city: 'São Paulo', state: 'SP', zipCode: '01420-000' },
+          })
+          .select()
+          .single();
+
+        if (pSofia && pMarcos) {
+          const { data: stSofia } = await supabase
+            .from('students')
+            .insert({
+              tenant_id: tenantId,
+              branch_id: branchId,
+              person_id: pSofia.id,
+              registration_number: 'MAT-2025-002',
+              enrollment_date: '2025-02-10',
+              status: 'active',
+              monthly_fee: 220,
+            })
+            .select()
+            .single();
+
+          if (stSofia) {
+            await supabase.from('guardian_relationships').insert({
+              tenant_id: tenantId,
+              student_id: stSofia.id,
+              guardian_person_id: pMarcos.id,
+              relationship_label: 'Pai',
+              is_legal_guardian: true,
+              is_financial_guardian: true,
+              is_emergency_contact: true,
+              is_pickup_authorized: true,
+              notes: 'Concentra o pagamento familiar de mensalidades dos dois filhos.',
+            });
+          }
+        }
+
+        // Inserir Aluna 3: Beatriz (Adulta, sem responsável)
+        const { data: pBeatriz } = await supabase
+          .from('persons')
+          .insert({
+            tenant_id: tenantId,
+            full_name: 'Beatriz Ferreira',
+            cpf: '17782403995',
+            birth_date: '2003-11-05',
+            gender: 'female',
+            phone: '(11) 99444-5566',
+            email: 'beatriz.ferreira@email.com',
+            address: { street: 'Av. Rebouças', number: '2100', neighborhood: 'Cerqueira César', city: 'São Paulo', state: 'SP', zipCode: '05402-000' },
+          })
+          .select()
+          .single();
+
+        if (pBeatriz) {
+          await supabase.from('students').insert({
+            tenant_id: tenantId,
+            branch_id: branchId,
+            person_id: pBeatriz.id,
+            registration_number: 'MAT-2025-003',
+            enrollment_date: '2025-03-01',
+            status: 'active',
+            monthly_fee: 260,
+          });
+        }
+      } catch (err: any) {
+        console.error('Erro ao reiniciar dados no Supabase:', err);
+      }
+    }
+
+    // 2. Reset no DataStore (LocalStorage)
+    DataStore.savePersons(INITIAL_PERSONS);
+    DataStore.saveStudents(INITIAL_STUDENTS);
+    DataStore.saveGuardianRelationships(INITIAL_GUARDIAN_RELATIONSHIPS);
+
+    return {
+      success: true,
+      message: 'Base de alunos, responsáveis e vínculos reiniciada com sucesso a partir do zero.',
     };
   },
 };

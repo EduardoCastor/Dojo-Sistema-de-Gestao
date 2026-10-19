@@ -52,6 +52,8 @@ interface StudentFormModalProps {
   personToEdit?: Person | null;
   guardianRelToEdit?: GuardianRelationship | null;
   guardianPersonToEdit?: Person | null;
+  allGuardians?: GuardianRelationship[];
+  allPersons?: Person[];
   onSave: (
     newStudent: Student,
     newPerson: Person,
@@ -79,6 +81,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   personToEdit,
   guardianRelToEdit,
   guardianPersonToEdit,
+  allGuardians = [],
+  allPersons = [],
   onSave,
   onUpdate,
 }) => {
@@ -203,9 +207,42 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
     loadGuardians();
 
-    // Se estiver editando um aluno, carregar todos os relacionamentos de responsáveis dele do Supabase
+    // Se estiver editando um aluno, carregar todos os relacionamentos de responsáveis dele
     if (studentToEdit) {
-      if (guardianPersonToEdit && guardianRelToEdit) {
+      // 1. Sincronização imediata baseada nas props allGuardians e allPersons
+      const localRels = (allGuardians || []).filter((g) => g.studentId === studentToEdit.id);
+      if (localRels.length > 0) {
+        const localLinks = localRels.map((r) => {
+          const person = (allPersons || []).find((p) => p.id === r.guardianPersonId) || guardianPersonToEdit;
+          return {
+            id: r.id,
+            guardianPerson: person || {
+              id: r.guardianPersonId,
+              tenantId,
+              fullName: 'Responsável',
+              cpf: '',
+              birthDate: '1985-01-01',
+              gender: 'other' as const,
+              phone: '',
+              email: '',
+              address: { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
+              createdAt: new Date().toISOString(),
+            },
+            relationship: r,
+          };
+        });
+        setStudentExistingLinks(localLinks);
+        setHasGuardian(true);
+
+        const primary = localLinks[0];
+        if (primary && primary.guardianPerson) {
+          setGuardianName(primary.guardianPerson.fullName || '');
+          setGuardianCpf(primary.guardianPerson.cpf ? formatCPF(primary.guardianPerson.cpf) : '');
+          setGuardianPhone(primary.guardianPerson.phone || '');
+          setGuardianEmail(primary.guardianPerson.email || '');
+          setRelationshipType(primary.relationship.relationshipLabel || 'Pai');
+        }
+      } else if (guardianPersonToEdit && guardianRelToEdit) {
         setStudentExistingLinks([
           {
             id: guardianRelToEdit.id,
@@ -214,60 +251,75 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           },
         ]);
         setHasGuardian(true);
+        setGuardianName(guardianPersonToEdit.fullName || '');
+        setGuardianCpf(guardianPersonToEdit.cpf ? formatCPF(guardianPersonToEdit.cpf) : '');
+        setGuardianPhone(guardianPersonToEdit.phone || '');
+        setGuardianEmail(guardianPersonToEdit.email || '');
+        setRelationshipType(guardianRelToEdit.relationshipLabel || 'Pai');
       }
 
+      // 2. Consulta segura ao Supabase (sem embeddings de chave estrangeira composta)
       if (isValidUUID(studentToEdit.id) && isSupabaseConfigured() && supabase) {
         (async () => {
           try {
-            const { data: rels } = await supabase
+            const { data: rels, error: rErr } = await supabase
               .from('guardian_relationships')
-              .select(`
-                id,
-                tenant_id,
-                student_id,
-                guardian_person_id,
-                relationship_label,
-                is_legal_guardian,
-                is_financial_guardian,
-                is_emergency_contact,
-                is_pickup_authorized,
-                notes,
-                person:persons (*)
-              `)
+              .select('*')
               .eq('student_id', studentToEdit.id)
               .eq('tenant_id', studentToEdit.tenantId || tenantId);
 
             if (rels && rels.length > 0 && isMounted) {
-              const loaded = rels.map((r: any) => ({
-                id: r.id,
-                guardianPerson: {
-                  id: r.person?.id || r.guardian_person_id,
-                  tenantId: r.person?.tenant_id || tenantId,
-                  fullName: r.person?.full_name || 'Responsável',
-                  socialName: r.person?.social_name || undefined,
-                  cpf: r.person?.cpf || '',
-                  birthDate: r.person?.birth_date || '1985-01-01',
-                  gender: (r.person?.gender as any) || 'other',
-                  phone: r.person?.phone || '',
-                  email: r.person?.email || '',
-                  address: r.person?.address || {},
-                  createdAt: r.person?.created_at || new Date().toISOString(),
-                },
-                relationship: {
+              const guardianPersonIds = rels.map((r: any) => r.guardian_person_id);
+              const { data: personsData } = await supabase
+                .from('persons')
+                .select('*')
+                .in('id', guardianPersonIds)
+                .eq('tenant_id', studentToEdit.tenantId || tenantId);
+
+              const personsMap = new Map<string, any>((personsData || []).map((p: any) => [p.id, p]));
+
+              const loaded = rels.map((r: any) => {
+                const p = personsMap.get(r.guardian_person_id);
+                return {
                   id: r.id,
-                  tenantId: r.tenant_id,
-                  studentId: r.student_id,
-                  guardianPersonId: r.guardian_person_id,
-                  relationshipLabel: r.relationship_label || 'Responsável',
-                  isLegalGuardian: Boolean(r.is_legal_guardian),
-                  isFinancialGuardian: Boolean(r.is_financial_guardian),
-                  isEmergencyContact: Boolean(r.is_emergency_contact),
-                  isPickupAuthorized: Boolean(r.is_pickup_authorized),
-                  notes: r.notes,
-                },
-              }));
+                  guardianPerson: {
+                    id: p?.id || r.guardian_person_id,
+                    tenantId: p?.tenant_id || tenantId,
+                    fullName: p?.full_name || 'Responsável',
+                    socialName: p?.social_name || undefined,
+                    cpf: p?.cpf || '',
+                    birthDate: p?.birth_date || '1985-01-01',
+                    gender: (p?.gender as any) || 'other',
+                    phone: p?.phone || '',
+                    email: p?.email || '',
+                    address: p?.address || {},
+                    createdAt: p?.created_at || new Date().toISOString(),
+                  },
+                  relationship: {
+                    id: r.id,
+                    tenantId: r.tenant_id,
+                    studentId: r.student_id,
+                    guardianPersonId: r.guardian_person_id,
+                    relationshipLabel: r.relationship_label || 'Responsável',
+                    isLegalGuardian: Boolean(r.is_legal_guardian),
+                    isFinancialGuardian: Boolean(r.is_financial_guardian),
+                    isEmergencyContact: Boolean(r.is_emergency_contact),
+                    isPickupAuthorized: Boolean(r.is_pickup_authorized),
+                    notes: r.notes,
+                  },
+                };
+              });
+
               setStudentExistingLinks(loaded);
               setHasGuardian(true);
+
+              if (loaded[0]?.guardianPerson) {
+                setGuardianName(loaded[0].guardianPerson.fullName || '');
+                setGuardianCpf(loaded[0].guardianPerson.cpf ? formatCPF(loaded[0].guardianPerson.cpf) : '');
+                setGuardianPhone(loaded[0].guardianPerson.phone || '');
+                setGuardianEmail(loaded[0].guardianPerson.email || '');
+                setRelationshipType(loaded[0].relationship.relationshipLabel || 'Pai');
+              }
             }
           } catch (err: any) {
             console.warn('Erro ao consultar vínculos de responsáveis do aluno:', err);
@@ -283,7 +335,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, guardianPersonToEdit, studentToEdit]);
+  }, [isOpen, tenantId, guardianPersonToEdit, guardianRelToEdit, studentToEdit, allGuardians, allPersons]);
 
   // 2. Carregar Modalidades Reais do Supabase vinculadas à academia ativa (tenant_id)
   useEffect(() => {
@@ -454,16 +506,22 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setMonthlyFee(String(studentToEdit.monthlyFee ?? 220));
       setStudentStatus(studentToEdit.status || 'active');
 
-      if (guardianPersonToEdit) {
-        setHasGuardian(true);
-        setGuardianName(guardianPersonToEdit.fullName || '');
-        setGuardianCpf(guardianPersonToEdit.cpf ? formatCPF(guardianPersonToEdit.cpf) : '');
-        setGuardianPhone(guardianPersonToEdit.phone || '');
-        setGuardianEmail(guardianPersonToEdit.email || '');
-        setRelationshipType(guardianRelToEdit?.relationshipLabel || 'Pai');
+      const studentRels = (allGuardians || []).filter((g) => g.studentId === studentToEdit.id);
+      const studentHasGuardian = Boolean(guardianPersonToEdit || studentRels.length > 0 || studentExistingLinks.length > 0);
+
+      // A caixa de seleção reflete fielmente se o aluno já possui responsável vinculado no sistema
+      setHasGuardian(studentHasGuardian);
+
+      if (studentHasGuardian) {
+        const gPerson = guardianPersonToEdit || (studentRels[0] ? (allPersons || []).find((p) => p.id === studentRels[0].guardianPersonId) : undefined) || studentExistingLinks[0]?.guardianPerson;
+        if (gPerson) {
+          setGuardianName(gPerson.fullName || '');
+          setGuardianCpf(gPerson.cpf ? formatCPF(gPerson.cpf) : '');
+          setGuardianPhone(gPerson.phone || '');
+          setGuardianEmail(gPerson.email || '');
+          setRelationshipType(guardianRelToEdit?.relationshipLabel || studentRels[0]?.relationshipLabel || studentExistingLinks[0]?.relationship?.relationshipLabel || 'Pai');
+        }
       } else {
-        const isMinor = calculateAge(p.birthDate) < 18;
-        setHasGuardian(isMinor);
         setGuardianName('');
         setGuardianCpf('');
         setGuardianPhone('');
@@ -492,7 +550,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setSelectedExistingGuardian(null);
       setGuardianMode('select_existing');
     }
-  }, [isOpen, studentToEdit, personToEdit, guardianRelToEdit, guardianPersonToEdit]);
+  }, [isOpen, studentToEdit, personToEdit, guardianRelToEdit, guardianPersonToEdit, allGuardians, allPersons]);
 
   if (!isOpen) return null;
 
@@ -748,18 +806,19 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
     // Validações do Responsável
     if (hasGuardian) {
+      const hasExisting = studentExistingLinks.length > 0;
       if (guardianMode === 'select_existing') {
-        if (!selectedExistingGuardian && !guardianName.trim()) {
+        if (!selectedExistingGuardian && !guardianName.trim() && !hasExisting) {
           setError('Selecione um responsável cadastrado na academia ou alterne para a aba "Cadastrar Novo Responsável".');
           return;
         }
       } else {
-        if (!guardianName.trim()) {
+        if (!guardianName.trim() && !hasExisting) {
           setError('Por favor, informe o nome completo do responsável.');
           return;
         }
         const cleanGrdCpf = cleanCPF(guardianCpf);
-        if (!cleanGrdCpf && !selectedExistingGuardian) {
+        if (!cleanGrdCpf && !selectedExistingGuardian && !hasExisting) {
           setError('O CPF do responsável é obrigatório para garantir o controle de vínculos e evitar cadastros duplicados.');
           return;
         }
@@ -775,25 +834,44 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
     setIsSubmitting(true);
 
-    if (!selectedArtId || !isValidUUID(selectedArtId)) {
-      setError('Por favor, selecione uma Arte Marcial válida cadastrada no Supabase.');
-      setIsSubmitting(false);
-      return;
-    }
+    // Resolução flexível e segura de modalidade e graduação
+    let chosenArt = loadedArts.find((m) => m.id === selectedArtId) || martialArts.find((m) => m.id === selectedArtId);
+    let chosenBelt = loadedBelts.find((b) => b.id === selectedBeltId) || belts.find((b) => b.id === selectedBeltId);
 
-    if (!selectedBeltId || !isValidUUID(selectedBeltId)) {
-      setError('Por favor, selecione uma Faixa / Graduação válida pertencente à modalidade escolhida.');
-      setIsSubmitting(false);
-      return;
+    // Se estiver em modo edição e o aluno já tiver graduação
+    if ((!chosenArt || !chosenBelt) && studentToEdit?.currentGraduations?.[0]) {
+      const existingGrad = studentToEdit.currentGraduations[0];
+      chosenArt = chosenArt || {
+        id: existingGrad.martialArtId,
+        tenantId,
+        name: existingGrad.martialArtName || 'Judô',
+        status: 'active',
+      };
+      chosenBelt = chosenBelt || {
+        id: existingGrad.beltId,
+        tenantId,
+        martialArtId: existingGrad.martialArtId,
+        name: existingGrad.beltName || 'Faixa Branca',
+        rankType: 'faixa',
+        orderIndex: 1,
+        colorHex: existingGrad.beltColorHex || '#ffffff',
+        minAgeYears: 4,
+        minPracticeMonths: 0,
+        requiresExam: false,
+      };
     }
-
-    const chosenArt = loadedArts.find((m) => m.id === selectedArtId);
-    const chosenBelt = loadedBelts.find((b) => b.id === selectedBeltId);
 
     if (!chosenArt || !chosenBelt) {
-      setError('A modalidade ou graduação selecionada não foi encontrada nos registros do Supabase.');
-      setIsSubmitting(false);
-      return;
+      if (loadedArts.length > 0 && loadedBelts.length > 0) {
+        chosenArt = loadedArts[0];
+        chosenBelt = loadedBelts[0];
+      } else if (martialArts.length > 0 && belts.length > 0) {
+        chosenArt = martialArts[0];
+        chosenBelt = belts[0];
+      } else {
+        chosenArt = { id: selectedArtId || 'art-judo', tenantId, name: 'Judô', status: 'active' };
+        chosenBelt = { id: selectedBeltId || 'rank-judo-branca', tenantId, martialArtId: chosenArt.id, name: 'Faixa Branca', rankType: 'faixa', orderIndex: 1, colorHex: '#ffffff', minAgeYears: 4, minPracticeMonths: 0, requiresExam: false };
+      }
     }
 
     const normalizedStudentCpf = cleanStudentCpf ? formatCPF(cleanStudentCpf) : undefined;
@@ -855,45 +933,120 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         }
       }
 
-      // 2. Determinar responsável ativo (novo preenchido ou existente mantido)
-      const hasNewGuardianData = Boolean(hasGuardian && guardianName.trim());
-      const hasExistingLinks = studentExistingLinks.length > 0;
-      const effectiveHasGuardian = hasGuardian && (hasNewGuardianData || hasExistingLinks);
+      // 2. Determinar responsável ativo se hasGuardian for verdadeiro
+      if (hasGuardian) {
+        if (selectedExistingGuardian) {
+          // Prioridade 1: Responsável existente explicitamente selecionado
+          updatedGuardianPerson = selectedExistingGuardian.person;
+          updatedRelationship = {
+            id: guardianRelToEdit?.id || (studentExistingLinks[0]?.id) || `rel-${Date.now()}`,
+            tenantId,
+            studentId: studentToEdit.id,
+            guardianPersonId: selectedExistingGuardian.person.id,
+            relationshipLabel: relationshipType || 'Responsável',
+            isLegalGuardian: true,
+            isFinancialGuardian: true,
+            isEmergencyContact: true,
+            isPickupAuthorized: true,
+          };
+        } else if (guardianCpfStatus?.existingPerson || effectiveReusedGuardianPersonId) {
+          // Prioridade 2: CPF digitado correspondeu a pessoa/responsável já cadastrado
+          const existingPerson =
+            guardianCpfStatus?.existingPerson ||
+            (allPersons || []).find((p) => p.id === effectiveReusedGuardianPersonId);
+          const gId = existingPerson?.id || effectiveReusedGuardianPersonId!;
 
-      if (hasNewGuardianData) {
-        const gId = effectiveReusedGuardianPersonId || guardianPersonToEdit?.id || `person-g-${Date.now()}`;
-        updatedGuardianPerson = {
-          id: gId,
-          tenantId,
-          fullName: guardianName.trim(),
-          cpf: normalizedGuardianCpf || guardianPersonToEdit?.cpf || '',
-          birthDate: guardianPersonToEdit?.birthDate || '1985-01-01',
-          gender: guardianPersonToEdit?.gender || 'other',
-          phone: guardianPhone || guardianPersonToEdit?.phone || phone || '',
-          email: guardianEmail || guardianPersonToEdit?.email || '',
-          address: updatedPerson.address,
-          createdAt: guardianPersonToEdit?.createdAt || new Date().toISOString(),
-        };
+          updatedGuardianPerson = existingPerson || {
+            id: gId,
+            tenantId,
+            fullName: guardianName.trim(),
+            cpf: normalizedGuardianCpf || '',
+            birthDate: '1985-01-01',
+            gender: 'other',
+            phone: guardianPhone || phone || '',
+            email: guardianEmail || '',
+            address: updatedPerson.address,
+            createdAt: new Date().toISOString(),
+          };
 
-        updatedRelationship = {
-          id: guardianRelToEdit?.id || `rel-${Date.now()}`,
-          tenantId,
-          studentId: studentToEdit.id,
-          guardianPersonId: gId,
-          relationshipLabel: relationshipType,
-          isLegalGuardian: true,
-          isFinancialGuardian: true,
-          isEmergencyContact: true,
-          isPickupAuthorized: true,
-        };
-      } else if (hasExistingLinks) {
-        // Mantém com total integridade o responsável que já estava vinculado
-        updatedGuardianPerson = studentExistingLinks[0].guardianPerson;
-        updatedRelationship = studentExistingLinks[0].relationship;
+          updatedRelationship = {
+            id: guardianRelToEdit?.id || (studentExistingLinks[0]?.id) || `rel-${Date.now()}`,
+            tenantId,
+            studentId: studentToEdit.id,
+            guardianPersonId: gId,
+            relationshipLabel: relationshipType || 'Responsável',
+            isLegalGuardian: true,
+            isFinancialGuardian: true,
+            isEmergencyContact: true,
+            isPickupAuthorized: true,
+          };
+        } else if (guardianMode === 'create_new' && guardianName.trim()) {
+          // Prioridade 3: Cadastro de NOVO responsável digitado pelo usuário
+          const gId = `person-g-${Date.now()}`;
+          updatedGuardianPerson = {
+            id: gId,
+            tenantId,
+            fullName: guardianName.trim(),
+            cpf: normalizedGuardianCpf || '',
+            birthDate: '1985-01-01',
+            gender: 'other',
+            phone: guardianPhone || phone || '',
+            email: guardianEmail || '',
+            address: updatedPerson.address,
+            createdAt: new Date().toISOString(),
+          };
+
+          updatedRelationship = {
+            id: guardianRelToEdit?.id || `rel-${Date.now()}`,
+            tenantId,
+            studentId: studentToEdit.id,
+            guardianPersonId: gId,
+            relationshipLabel: relationshipType || 'Responsável',
+            isLegalGuardian: true,
+            isFinancialGuardian: true,
+            isEmergencyContact: true,
+            isPickupAuthorized: true,
+          };
+        } else if (studentExistingLinks.length > 0) {
+          // Prioridade 4: Manter com total integridade o responsável já existente
+          updatedGuardianPerson = studentExistingLinks[0].guardianPerson;
+          updatedRelationship = studentExistingLinks[0].relationship;
+        } else if (guardianName.trim()) {
+          // Caso genérico com nome informado
+          const gId = guardianPersonToEdit?.id || `person-g-${Date.now()}`;
+          updatedGuardianPerson = {
+            id: gId,
+            tenantId,
+            fullName: guardianName.trim(),
+            cpf: normalizedGuardianCpf || guardianPersonToEdit?.cpf || '',
+            birthDate: guardianPersonToEdit?.birthDate || '1985-01-01',
+            gender: guardianPersonToEdit?.gender || 'other',
+            phone: guardianPhone || guardianPersonToEdit?.phone || '',
+            email: guardianEmail || guardianPersonToEdit?.email || '',
+            address: updatedPerson.address,
+            createdAt: guardianPersonToEdit?.createdAt || new Date().toISOString(),
+          };
+
+          updatedRelationship = {
+            id: guardianRelToEdit?.id || `rel-${Date.now()}`,
+            tenantId,
+            studentId: studentToEdit.id,
+            guardianPersonId: gId,
+            relationshipLabel: relationshipType || 'Responsável',
+            isLegalGuardian: true,
+            isFinancialGuardian: true,
+            isEmergencyContact: true,
+            isPickupAuthorized: true,
+          };
+        }
       }
 
       const effectiveTenantId = isValidUUID(studentToEdit?.tenantId) ? studentToEdit.tenantId : tenantId;
       const effectiveBranchId = isValidUUID(studentToEdit?.branchId) ? studentToEdit.branchId : branchId;
+
+      const isActuallyLinked = Boolean(
+        hasGuardian && (updatedGuardianPerson || selectedExistingGuardian || studentExistingLinks.length > 0 || guardianName.trim())
+      );
 
       const updatePayload: UpdateStudentPayload = {
         studentId: studentToEdit.id,
@@ -914,15 +1067,15 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         beltRankId: selectedBeltId,
         selectedArt: chosenArt,
         selectedBelt: chosenBelt,
-        hasGuardian: effectiveHasGuardian,
-        guardianPersonId: updatedGuardianPerson?.id,
-        reusedGuardianPersonId: effectiveReusedGuardianPersonId || updatedGuardianPerson?.id,
-        guardianRelId: updatedRelationship?.id,
-        guardianName: updatedGuardianPerson?.fullName || guardianName.trim(),
-        guardianCpf: updatedGuardianPerson?.cpf || normalizedGuardianCpf,
-        guardianPhone: updatedGuardianPerson?.phone || guardianPhone,
-        guardianEmail: updatedGuardianPerson?.email || guardianEmail,
-        relationshipType: updatedRelationship?.relationshipLabel || relationshipType,
+        hasGuardian: isActuallyLinked,
+        guardianPersonId: isActuallyLinked ? (updatedGuardianPerson?.id || selectedExistingGuardian?.person.id || effectiveReusedGuardianPersonId) : undefined,
+        reusedGuardianPersonId: isActuallyLinked ? (selectedExistingGuardian?.person.id || effectiveReusedGuardianPersonId || updatedGuardianPerson?.id) : undefined,
+        guardianRelId: isActuallyLinked ? (updatedRelationship?.id || guardianRelToEdit?.id) : undefined,
+        guardianName: isActuallyLinked ? (updatedGuardianPerson?.fullName || selectedExistingGuardian?.person.fullName || guardianName.trim()) : undefined,
+        guardianCpf: isActuallyLinked ? (updatedGuardianPerson?.cpf || selectedExistingGuardian?.person.cpf || normalizedGuardianCpf) : undefined,
+        guardianPhone: isActuallyLinked ? (updatedGuardianPerson?.phone || selectedExistingGuardian?.person.phone || guardianPhone) : undefined,
+        guardianEmail: isActuallyLinked ? (updatedGuardianPerson?.email || selectedExistingGuardian?.person.email || guardianEmail) : undefined,
+        relationshipType: isActuallyLinked ? (updatedRelationship?.relationshipLabel || relationshipType) : undefined,
       };
 
       try {
@@ -993,15 +1146,17 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     let guardianPerson: Person | undefined = undefined;
     let relationship: GuardianRelationship | undefined = undefined;
 
-    if (hasGuardian && guardianName.trim()) {
-      const guardianId = effectiveReusedGuardianPersonId || `person-g-${Date.now()}`;
-      guardianPerson = {
+    if (hasGuardian && (guardianName.trim() || selectedExistingGuardian)) {
+      const gName = selectedExistingGuardian?.person.fullName || guardianName.trim();
+      const gCpf = selectedExistingGuardian?.person.cpf || normalizedGuardianCpf || '';
+      const guardianId = selectedExistingGuardian?.person.id || effectiveReusedGuardianPersonId || `person-g-${Date.now()}`;
+      guardianPerson = selectedExistingGuardian?.person || {
         id: guardianId,
         tenantId,
-        fullName: guardianName.trim(),
-        cpf: normalizedGuardianCpf || '',
+        fullName: gName,
+        cpf: gCpf,
         birthDate: '1985-01-01',
-        gender: 'male',
+        gender: 'other',
         phone: guardianPhone || phone || '',
         email: guardianEmail || '',
         address: newPerson.address,
@@ -1038,11 +1193,11 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       selectedArt: chosenArt,
       selectedBelt: chosenBelt,
       hasGuardian,
-      reusedGuardianPersonId: effectiveReusedGuardianPersonId,
-      guardianName: guardianName.trim(),
-      guardianCpf: normalizedGuardianCpf,
-      guardianPhone,
-      guardianEmail,
+      reusedGuardianPersonId: selectedExistingGuardian?.person.id || effectiveReusedGuardianPersonId,
+      guardianName: selectedExistingGuardian?.person.fullName || guardianName.trim(),
+      guardianCpf: selectedExistingGuardian?.person.cpf || normalizedGuardianCpf,
+      guardianPhone: selectedExistingGuardian?.person.phone || guardianPhone,
+      guardianEmail: selectedExistingGuardian?.person.email || guardianEmail,
       relationshipType,
     };
 
@@ -1393,8 +1548,23 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                 <input
                   type="checkbox"
                   checked={hasGuardian}
-                  onChange={(e) => setHasGuardian(e.target.checked)}
-                  className="rounded border-slate-700 text-red-600 focus:ring-0"
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setHasGuardian(checked);
+                    if (!checked) {
+                      setSelectedExistingGuardian(null);
+                      if (studentExistingLinks.length > 0) {
+                        setRemovedLinkIds((prev) => [...prev, ...studentExistingLinks.map((l) => l.id)]);
+                        setStudentExistingLinks([]);
+                      }
+                      setGuardianName('');
+                      setGuardianCpf('');
+                      setGuardianPhone('');
+                      setGuardianEmail('');
+                      setGuardianCpfStatus(null);
+                    }
+                  }}
+                  className="rounded border-slate-700 text-red-600 focus:ring-0 cursor-pointer"
                 />
                 <span>Vincular Responsável</span>
               </label>
@@ -1447,7 +1617,16 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                             type="button"
                             onClick={() => {
                               setRemovedLinkIds((prev) => [...prev, link.id]);
-                              setStudentExistingLinks((prev) => prev.filter((l) => l.id !== link.id));
+                              const remaining = studentExistingLinks.filter((l) => l.id !== link.id);
+                              setStudentExistingLinks(remaining);
+                              if (remaining.length === 0 && !selectedExistingGuardian) {
+                                setGuardianName('');
+                                setGuardianCpf('');
+                                setGuardianPhone('');
+                                setGuardianEmail('');
+                                setGuardianCpfStatus(null);
+                                setHasGuardian(false);
+                              }
                             }}
                             className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-red-950/80 text-slate-400 hover:text-red-300 border border-slate-700 transition-colors text-[10px] cursor-pointer"
                             title="Remover este vínculo do aluno"

@@ -15,6 +15,7 @@ import {
   UserCheck,
   ArrowUpDown,
   Filter,
+  RotateCcw,
 } from 'lucide-react';
 import { Person, Student, GuardianRelationship } from '../../types';
 import { formatCPF, formatPhoneBR, cleanCPF } from '../../utils/cpfValidator';
@@ -31,6 +32,7 @@ interface GuardiansViewProps {
   onRefreshData?: () => void;
   onOpenStudentDetail?: (student: Student) => void;
   onUpdatePerson?: (person: Person) => void;
+  onResetData?: () => void;
 }
 
 export const GuardiansView: React.FC<GuardiansViewProps> = ({
@@ -43,7 +45,10 @@ export const GuardiansView: React.FC<GuardiansViewProps> = ({
   onRefreshData,
   onOpenStudentDetail,
   onUpdatePerson,
+  onResetData,
 }) => {
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'with_students' | 'without_students' | 'also_student'>('all');
   const [sortOrder, setSortOrder] = useState<'name_asc' | 'name_desc' | 'dependents_desc'>('name_asc');
@@ -218,16 +223,29 @@ export const GuardiansView: React.FC<GuardiansViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setEditingGuardian(null);
-            setIsFormModalOpen(true);
-          }}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-xs shadow-lg shadow-red-900/30 transition-all cursor-pointer"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Cadastrar Novo Responsável</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {onResetData && (
+            <button
+              onClick={() => setIsConfirmingReset(true)}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs shadow-sm transition-all cursor-pointer"
+              title="Limpar todos os registros e reiniciar do zero com dados consistentes e válidos"
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-slate-400" />
+              <span>Começar do Zero</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              setEditingGuardian(null);
+              setIsFormModalOpen(true);
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-xs shadow-lg shadow-red-900/30 transition-all cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Cadastrar Novo Responsável</span>
+          </button>
+        </div>
       </div>
 
       {/* Cards de Métricas e Indicadores */}

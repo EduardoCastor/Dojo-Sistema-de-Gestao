@@ -494,10 +494,16 @@ export default function App() {
           const filtered = prev.filter(
             (p) => p.id !== result.person.id && (!result.guardianPerson || p.id !== result.guardianPerson.id)
           );
-          return [...toAdd, ...filtered];
+          const next = [...toAdd, ...filtered];
+          DataStore.savePersons(next);
+          return next;
         });
         if (result.relationship) {
-          setGuardians((prev) => [result.relationship!, ...prev]);
+          setGuardians((prev) => {
+            const next = [result.relationship!, ...prev];
+            DataStore.saveGuardianRelationships(next);
+            return next;
+          });
         }
 
         // Cache local
@@ -513,6 +519,7 @@ export default function App() {
           `Matriculado o aluno ${result.person.fullName} no banco de dados.`
         );
 
+        await handleRefreshStudents();
         setIsNewStudentOpen(false);
         return;
       } catch (err: any) {
@@ -614,8 +621,11 @@ export default function App() {
           if (result.guardianPerson) {
             map.set(result.guardianPerson.id, result.guardianPerson);
           }
-          return Array.from(map.values());
+          const next = Array.from(map.values());
+          DataStore.savePersons(next);
+          return next;
         });
+
         if (result.relationship) {
           setGuardians((prev) => {
             const filtered = prev.filter(
@@ -636,6 +646,7 @@ export default function App() {
         // Cache local
         DataStore.saveStudents(students.map((s) => (s.id === result.student.id ? result.student : s)));
 
+        await handleRefreshStudents();
         setIsNewStudentOpen(false);
         setEditingStudent(null);
         return;
@@ -689,6 +700,21 @@ export default function App() {
       DataStore.savePersons(next);
       return next;
     });
+  };
+
+  const handleResetAcademyData = async () => {
+    try {
+      setIsLoadingStudents(true);
+      await studentService.resetAcademyData(currentTenantId);
+      await handleRefreshStudents();
+      setPersons(DataStore.getPersons(currentTenantId));
+      setStudents(DataStore.getStudents(currentTenantId));
+      setGuardians(DataStore.getGuardianRelationships(currentTenantId));
+    } catch (err: any) {
+      console.error('Erro ao reiniciar dados do dojo:', err);
+    } finally {
+      setIsLoadingStudents(false);
+    }
   };
 
   // Handlers for Attendance
@@ -1109,6 +1135,7 @@ export default function App() {
               onOpenCreateStudent={handleOpenCreateStudent}
               onEditStudent={handleOpenEditStudent}
               onUpdatePerson={handleUpdatePerson}
+              onResetData={handleResetAcademyData}
             />
           )}
 
@@ -1125,6 +1152,7 @@ export default function App() {
                 handleOpenEditStudent(student);
               }}
               onUpdatePerson={handleUpdatePerson}
+              onResetData={handleResetAcademyData}
             />
           )}
 
@@ -1388,6 +1416,8 @@ export default function App() {
               })()
             : null
         }
+        allGuardians={guardians}
+        allPersons={persons}
         onSave={handleSaveStudent}
         onUpdate={handleUpdateStudent}
       />
