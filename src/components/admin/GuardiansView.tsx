@@ -584,6 +584,59 @@ export const GuardiansView: React.FC<GuardiansViewProps> = ({
           }}
         />
       )}
+
+      {/* MODAL DE CONFIRMAÇÃO: REINICIAR BASE DO ZERO */}
+      {isConfirmingReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-md rounded-2xl border border-red-500/40 bg-slate-900 p-6 shadow-2xl text-slate-200">
+            <div className="flex items-center gap-3 text-red-400 mb-3">
+              <RotateCcw className="h-6 w-6 shrink-0" />
+              <h3 className="text-base font-bold text-white">Reiniciar Base do Zero</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed mb-4">
+              Esta ação irá limpar os registros atuais de alunos, responsáveis e vínculos da academia, restaurando uma base limpa e estruturada com dados íntegros e CPFs válidos.
+            </p>
+            <div className="p-3 rounded-lg bg-red-950/40 border border-red-500/30 text-[11px] text-red-200 mb-5">
+              ⚠️ Vínculos corrompidos ou registros duplicados serão completamente redefinidos para o padrão seguro.
+            </div>
+            <div className="flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsConfirmingReset(false)}
+                disabled={isResetting}
+                className="px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition-colors font-semibold cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={async () => {
+                  if (onResetData) {
+                    setIsResetting(true);
+                    try {
+                      await onResetData();
+                    } finally {
+                      setIsResetting(false);
+                      setIsConfirmingReset(false);
+                    }
+                  }
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 active:bg-red-700 text-xs text-white font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isResetting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Reiniciando...</span>
+                  </>
+                ) : (
+                  <span>Sim, Reiniciar do Zero</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

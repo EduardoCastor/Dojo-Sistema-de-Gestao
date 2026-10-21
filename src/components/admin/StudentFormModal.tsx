@@ -835,44 +835,80 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     setIsSubmitting(true);
 
     // Resolução flexível e segura de modalidade e graduação
-    let chosenArt = loadedArts.find((m) => m.id === selectedArtId) || martialArts.find((m) => m.id === selectedArtId);
-    let chosenBelt = loadedBelts.find((b) => b.id === selectedBeltId) || belts.find((b) => b.id === selectedBeltId);
+    let matchedArt: MartialArt | undefined = loadedArts.find((m) => m.id === selectedArtId) || martialArts.find((m) => m.id === selectedArtId);
+    let matchedBelt: BeltRank | undefined = loadedBelts.find((b) => b.id === selectedBeltId) || belts.find((b) => b.id === selectedBeltId);
 
     // Se estiver em modo edição e o aluno já tiver graduação
-    if ((!chosenArt || !chosenBelt) && studentToEdit?.currentGraduations?.[0]) {
+    if ((!matchedArt || !matchedBelt) && studentToEdit?.currentGraduations?.[0]) {
       const existingGrad = studentToEdit.currentGraduations[0];
-      chosenArt = chosenArt || {
-        id: existingGrad.martialArtId,
-        tenantId,
-        name: existingGrad.martialArtName || 'Judô',
-        status: 'active',
-      };
-      chosenBelt = chosenBelt || {
-        id: existingGrad.beltId,
-        tenantId,
-        martialArtId: existingGrad.martialArtId,
-        name: existingGrad.beltName || 'Faixa Branca',
-        rankType: 'faixa',
-        orderIndex: 1,
-        colorHex: existingGrad.beltColorHex || '#ffffff',
-        minAgeYears: 4,
-        minPracticeMonths: 0,
-        requiresExam: false,
-      };
-    }
-
-    if (!chosenArt || !chosenBelt) {
-      if (loadedArts.length > 0 && loadedBelts.length > 0) {
-        chosenArt = loadedArts[0];
-        chosenBelt = loadedBelts[0];
-      } else if (martialArts.length > 0 && belts.length > 0) {
-        chosenArt = martialArts[0];
-        chosenBelt = belts[0];
-      } else {
-        chosenArt = { id: selectedArtId || 'art-judo', tenantId, name: 'Judô', status: 'active' };
-        chosenBelt = { id: selectedBeltId || 'rank-judo-branca', tenantId, martialArtId: chosenArt.id, name: 'Faixa Branca', rankType: 'faixa', orderIndex: 1, colorHex: '#ffffff', minAgeYears: 4, minPracticeMonths: 0, requiresExam: false };
+      if (!matchedArt) {
+        matchedArt = {
+          id: existingGrad.martialArtId,
+          tenantId,
+          name: existingGrad.martialArtName || 'Judô',
+          origin: 'Japão',
+          description: 'Arte marcial e esporte de combate',
+          status: 'active',
+        };
+      }
+      if (!matchedBelt) {
+        matchedBelt = {
+          id: existingGrad.beltId,
+          tenantId,
+          martialArtId: existingGrad.martialArtId,
+          name: existingGrad.beltName || 'Faixa Branca',
+          rankType: 'faixa',
+          orderIndex: 1,
+          colorHex: existingGrad.beltColorHex || '#ffffff',
+          minAgeYears: 4,
+          minPracticeMonths: 0,
+          technicalRequirements: 'Fundamentos e técnicas iniciais',
+          requiresExam: false,
+        };
       }
     }
+
+    if (!matchedArt) {
+      if (loadedArts.length > 0) {
+        matchedArt = loadedArts[0];
+      } else if (martialArts.length > 0) {
+        matchedArt = martialArts[0];
+      } else {
+        matchedArt = {
+          id: selectedArtId || 'art-judo',
+          tenantId,
+          name: 'Judô',
+          origin: 'Japão',
+          description: 'Arte marcial oficial',
+          status: 'active',
+        };
+      }
+    }
+
+    if (!matchedBelt) {
+      if (loadedBelts.length > 0) {
+        matchedBelt = loadedBelts[0];
+      } else if (belts.length > 0) {
+        matchedBelt = belts[0];
+      } else {
+        matchedBelt = {
+          id: selectedBeltId || 'rank-judo-branca',
+          tenantId,
+          martialArtId: matchedArt.id,
+          name: 'Faixa Branca',
+          rankType: 'faixa',
+          orderIndex: 1,
+          colorHex: '#ffffff',
+          minAgeYears: 4,
+          minPracticeMonths: 0,
+          technicalRequirements: 'Fundamentos e regras de dojo',
+          requiresExam: false,
+        };
+      }
+    }
+
+    const chosenArt: MartialArt = matchedArt;
+    const chosenBelt: BeltRank = matchedBelt;
 
     const normalizedStudentCpf = cleanStudentCpf ? formatCPF(cleanStudentCpf) : undefined;
     const cleanGrdCpf = cleanCPF(guardianCpf);
