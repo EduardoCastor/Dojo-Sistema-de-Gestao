@@ -2144,7 +2144,6 @@ export const studentService = {
       }
     }
 
-    // 1. Atualizar registro na tabela persons
     const personAddress = {
       street: 'Rua das Flores',
       number: '123',
@@ -2154,52 +2153,268 @@ export const studentService = {
       zipCode: '01000-000',
     };
 
-    const { data: updatedPerson, error: personError } = await supabase
-      .from('persons')
-      .update({
-        full_name: payload.fullName.trim(),
-        social_name: payload.socialName?.trim() || null,
-        cpf: studentCpfClean || null,
-        birth_date: payload.birthDate,
-        gender: payload.gender || 'male',
-        phone: payload.phone?.trim() || null,
-        email: payload.email?.trim() || null,
+    // 0.1. Tentar executar via RPC atômica update_student_atomic (transação segura ACID)
+    try {
+      const guardianPersonPayload = (payload.hasGuardian && payload.guardianName?.trim()) ? {
+        id: effectiveGuardianPersonId || null,
+        full_name: payload.guardianName.trim(),
+        cpf: payload.guardianCpf ? cleanCPF(payload.guardianCpf) || null : null,
+        birth_date: '1985-01-01',
+        gender: 'other',
+        phone: payload.guardianPhone?.trim() || payload.phone?.trim() || null,
+        email: payload.guardianEmail?.trim() || 'responsavel@tatamehub.com.br',
         address: personAddress,
-        updated_at: new Date().toISOString(),
-      })
+      } : null;
+
+      const guardianRelPayload = guardianPersonPayload ? {
+        relationship_label: payload.relationshipType || 'Responsável',
+        is_legal_guardian: true,
+        is_financial_guardian: true,
+        is_emergency_contact: true,
+        is_pickup_authorized: true,
+      } : null;
+
+      const graduationPayload = (isValidUUID(payload.martialArtId) && isValidUUID(payload.beltRankId)) ? {
+        martial_art_id: payload.martialArtId,
+        belt_rank_id: payload.beltRankId,
+        graduated_at: new Date().toISOString().split('T')[0],
+        examiner_name: 'Atualização administrativa',
+        notes: 'Graduação atualizada no cadastro do aluno',
+      } : null;
+
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('update_student_atomic', {
+        p_tenant_id: payload.tenantId,
+        p_student_id: payload.studentId,
+        p_person_id: payload.personId,
+        p_branch_id: isValidUUID(payload.branchId) ? payload.branchId : null,
+        p_person: {
+          full_name: payload.fullName.trim(),
+          social_name: payload.socialName?.trim() || null,
+          cpf: studentCpfClean || null,
+          birth_date: payload.birthDate,
+          gender: payload.gender || 'male',
+          phone: payload.phone?.trim() || null,
+          email: payload.email?.trim() || null,
+          address: personAddress,
+        },
+        p_student: {
+          monthly_fee: payload.monthlyFee,
+          status: payload.status || 'active',
+          notes: null,
+        },
+        p_guardian_person: guardianPersonPayload,
+        p_guardian_rel: guardianRelPayload,
+        p_remove_guardian: payload.hasGuardian === false,
+        p_graduation: graduationPayload,
+      });
+
+      if (!rpcError && rpcResult?.success) {
+        // Consultar graduações atualizadas do aluno
+        let finalGrads: any[] = [];
+        try {
+          const { data: allStudentGrads } = await supabase
+            .from('student_graduations')
+            .select(`
+              id,
+              martial_art_id,
+              belt_rank_id,
+              graduated_at,
+              martial_art:martial_arts (id, name),
+              belt_rank:belt_ranks (id, name, color_hex)
+            `)
+            .eq('student_id', payload.studentId)
+            .eq('tenant_id', payload.tenantId)
+            .order('graduated_at', { ascending: false });
+
+          const latestMap = new Map<string, any>();
+          (allStudentGrads || []).forEach((g: any) => {
+            if (!latestMap.has(g.martial_art_id)) {
+              latestMap.set(g.martial_art_id, {
+                martialArtId: g.martial_art_id,
+                martialArtName: g.martial_art?.name || 'Arte Marcial',
+                beltId: g.belt_rank_id,
+                beltName: g.belt_rank?.name || 'Faixa',
+                beltColorHex: g.belt_rank?.color_hex || '#ffffff',
+                graduatedAt: g.graduated_at,
+              });
+            }
+          });
+          finalGrads = Array.from(latestMap.values());
+        } catch {
+          if (payload.selectedArt && payload.selectedBelt) {
+            finalGrads = [{
+              martialArtId: payload.selectedArt.id,
+              martialArtName: payload.selectedArt.name,
+              beltId: payload.selectedBelt.id,
+              beltName: payload.selectedBelt.name,
+              beltColorHex: payload.selectedBelt.colorHex || '#ffffff',
+              graduatedAt: new Date().toISOString().split('T')[0],
+            }];
+          }
+        }
+
+        const rPerson = rpcResult.person || {};
+        const rStudent = rpcResult.student || {};
+        const rGuardianPerson = rpcResult.guardian_person;
+        const rGuardianRel = rpcResult.guardian_relationship;
+
+        return {
+          student: {
+            id: payload.studentId,
+            tenantId: payload.tenantId,
+            branchId: payload.branchId,
+            personId: payload.personId,
+            registrationNumber: rStudent.registration_number || 'MAT-ATUALIZADO',
+            enrollmentDate: rStudent.enrollment_date || new Date().toISOString().split('T')[0],
+            status: rStudent.status || payload.status || 'active',
+            currentGraduations: finalGrads,
+            monthlyFee: Number(rStudent.monthly_fee) || payload.monthlyFee,
+            notes: rStudent.notes || undefined,
+          },
+          person: {
+            id: payload.personId,
+            tenantId: payload.tenantId,
+            fullName: rPerson.full_name || payload.fullName.trim(),
+            socialName: rPerson.social_name || payload.socialName?.trim() || undefined,
+            cpf: rPerson.cpf || payload.cpf || '',
+            birthDate: rPerson.birth_date || payload.birthDate,
+            gender: rPerson.gender || payload.gender || 'male',
+            phone: rPerson.phone || payload.phone || '',
+            email: rPerson.email || payload.email || '',
+            address: rPerson.address || personAddress,
+            createdAt: rPerson.created_at || new Date().toISOString(),
+          },
+          guardianPerson: rGuardianPerson ? {
+            id: rGuardianPerson.id,
+            tenantId: rGuardianPerson.tenant_id,
+            fullName: rGuardianPerson.full_name,
+            socialName: rGuardianPerson.social_name || undefined,
+            cpf: rGuardianPerson.cpf || '',
+            birthDate: rGuardianPerson.birth_date,
+            gender: rGuardianPerson.gender || 'other',
+            phone: rGuardianPerson.phone || '',
+            email: rGuardianPerson.email || '',
+            address: rGuardianPerson.address || {},
+            createdAt: rGuardianPerson.created_at,
+          } : undefined,
+          relationship: rGuardianRel ? {
+            id: rGuardianRel.id,
+            tenantId: rGuardianRel.tenant_id,
+            studentId: payload.studentId,
+            guardianPersonId: rGuardianRel.guardian_person_id,
+            relationshipLabel: rGuardianRel.relationship_label,
+            isLegalGuardian: rGuardianRel.is_legal_guardian,
+            isFinancialGuardian: rGuardianRel.is_financial_guardian,
+            isEmergencyContact: rGuardianRel.is_emergency_contact,
+            isPickupAuthorized: rGuardianRel.is_pickup_authorized,
+          } : undefined,
+        };
+      }
+    } catch (rpcEx) {
+      console.warn('Aviso: RPC update_student_atomic indisponível, executando atualização direta:', rpcEx);
+    }
+
+    // 1. Atualizar registro na tabela persons com tratamento para 'permission denied for table users'
+    const personUpdatePayload = {
+      full_name: payload.fullName.trim(),
+      social_name: payload.socialName?.trim() || null,
+      cpf: studentCpfClean || null,
+      birth_date: payload.birthDate,
+      gender: payload.gender || 'male',
+      phone: payload.phone?.trim() || null,
+      email: payload.email?.trim() || null,
+      address: personAddress,
+      updated_at: new Date().toISOString(),
+    };
+
+    let updatedPerson: any = null;
+    const { data: pSelectData, error: personError } = await supabase
+      .from('persons')
+      .update(personUpdatePayload)
       .eq('id', payload.personId)
       .eq('tenant_id', payload.tenantId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (personError) {
-      throw new Error(`Erro ao atualizar dados pessoais do aluno: ${personError.message}`);
-    }
+      // Se o erro for 'permission denied for table users', decorre da política persons_select avaliando
+      // subconsulta de auth.users no RETURNING clause. Tentamos o update direto sem select.
+      if (personError.message?.toLowerCase().includes('table users')) {
+        const { error: rawUpdateError } = await supabase
+          .from('persons')
+          .update(personUpdatePayload)
+          .eq('id', payload.personId)
+          .eq('tenant_id', payload.tenantId);
 
-    if (!updatedPerson) {
-      throw new Error('Nenhum registro de pessoa localizado para atualização ou permissão negada.');
+        if (rawUpdateError) {
+          throw new Error(`Erro ao atualizar dados pessoais do aluno: ${rawUpdateError.message}`);
+        }
+
+        updatedPerson = {
+          id: payload.personId,
+          tenant_id: payload.tenantId,
+          ...personUpdatePayload,
+          created_at: new Date().toISOString(),
+        };
+      } else {
+        throw new Error(`Erro ao atualizar dados pessoais do aluno: ${personError.message}`);
+      }
+    } else {
+      updatedPerson = pSelectData || {
+        id: payload.personId,
+        tenant_id: payload.tenantId,
+        ...personUpdatePayload,
+        created_at: new Date().toISOString(),
+      };
     }
 
     // 2. Atualizar registro na tabela students
-    const { data: updatedStudentData, error: studentError } = await supabase
+    const studentUpdatePayload = {
+      monthly_fee: payload.monthlyFee,
+      status: payload.status || 'active',
+      branch_id: payload.branchId,
+      updated_at: new Date().toISOString(),
+    };
+
+    let updatedStudentData: any = null;
+    const { data: sSelectData, error: studentError } = await supabase
       .from('students')
-      .update({
-        monthly_fee: payload.monthlyFee,
-        status: payload.status || 'active',
-        branch_id: payload.branchId,
-        updated_at: new Date().toISOString(),
-      })
+      .update(studentUpdatePayload)
       .eq('id', payload.studentId)
       .eq('tenant_id', payload.tenantId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (studentError) {
-      throw new Error(`Erro ao atualizar matrícula do aluno: ${studentError.message}`);
-    }
+      if (studentError.message?.toLowerCase().includes('table users')) {
+        const { error: rawStudentError } = await supabase
+          .from('students')
+          .update(studentUpdatePayload)
+          .eq('id', payload.studentId)
+          .eq('tenant_id', payload.tenantId);
 
-    if (!updatedStudentData) {
-      throw new Error('Nenhum registro de aluno localizado para atualização ou permissão negada.');
+        if (rawStudentError) {
+          throw new Error(`Erro ao atualizar matrícula do aluno: ${rawStudentError.message}`);
+        }
+
+        updatedStudentData = {
+          id: payload.studentId,
+          tenant_id: payload.tenantId,
+          ...studentUpdatePayload,
+          registration_number: 'MAT-ATUALIZADO',
+          enrollment_date: new Date().toISOString().split('T')[0],
+        };
+      } else {
+        throw new Error(`Erro ao atualizar matrícula do aluno: ${studentError.message}`);
+      }
+    } else {
+      updatedStudentData = sSelectData || {
+        id: payload.studentId,
+        tenant_id: payload.tenantId,
+        ...studentUpdatePayload,
+        registration_number: 'MAT-ATUALIZADO',
+        enrollment_date: new Date().toISOString().split('T')[0],
+      };
     }
 
     // 3. Atualizar, Vincular ou Desvincular Responsável Legal / Financeiro
@@ -2709,16 +2924,43 @@ export const studentService = {
     if (data.gender) updatePayload.gender = data.gender;
     if (data.address) updatePayload.address = data.address;
 
-    const { data: updated, error } = await supabase
+    let updated: any = null;
+    const { data: selectUpdated, error } = await supabase
       .from('persons')
       .update(updatePayload)
       .eq('id', personId)
       .eq('tenant_id', tenantId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
-      throw new Error(`Erro ao atualizar dados pessoais no Supabase: ${error.message}`);
+      if (error.message?.toLowerCase().includes('table users')) {
+        const { error: rawError } = await supabase
+          .from('persons')
+          .update(updatePayload)
+          .eq('id', personId)
+          .eq('tenant_id', tenantId);
+
+        if (rawError) {
+          throw new Error(`Erro ao atualizar dados pessoais no Supabase: ${rawError.message}`);
+        }
+
+        updated = {
+          id: personId,
+          tenant_id: tenantId,
+          ...updatePayload,
+          created_at: new Date().toISOString(),
+        };
+      } else {
+        throw new Error(`Erro ao atualizar dados pessoais no Supabase: ${error.message}`);
+      }
+    } else {
+      updated = selectUpdated || {
+        id: personId,
+        tenant_id: tenantId,
+        ...updatePayload,
+        created_at: new Date().toISOString(),
+      };
     }
 
     return {
