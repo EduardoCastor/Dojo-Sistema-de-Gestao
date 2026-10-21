@@ -111,13 +111,27 @@ export const classService = {
         return DataStore.getClasses(tenantId);
       }
 
-      // 2. Buscar horários estruturados
+      // 2. Buscar horários estruturados na tabela class_group_schedules (com fallback para class_schedules)
       let schedulesMap = new Map<string, ClassSchedule[]>();
       try {
-        const { data: schedulesData } = await supabase
-          .from('class_schedules')
+        let schedulesData: any[] | null = null;
+        const resGroup = await supabase
+          .from('class_group_schedules')
           .select('*')
           .eq('tenant_id', tenantId);
+
+        if (!resGroup.error && resGroup.data) {
+          schedulesData = resGroup.data;
+        } else {
+          // Fallback para a view ou tabela class_schedules
+          const resFallback = await supabase
+            .from('class_schedules')
+            .select('*')
+            .eq('tenant_id', tenantId);
+          if (!resFallback.error && resFallback.data) {
+            schedulesData = resFallback.data;
+          }
+        }
 
         if (schedulesData) {
           schedulesData.forEach((s: any) => {
@@ -141,7 +155,7 @@ export const classService = {
           });
         }
       } catch (errSched) {
-        console.warn('Aviso ao consultar class_schedules:', errSched);
+        console.warn('Aviso ao consultar class_group_schedules:', errSched);
       }
 
       const mapped: ClassGroup[] = (classesData || []).map((c: any) => {
@@ -360,6 +374,7 @@ export const classService = {
       notes?: string;
     },
     schedules: Array<{
+      id?: string;
       dayOfWeek: number;
       startTime: string;
       endTime: string;
@@ -379,6 +394,7 @@ export const classService = {
 
     // Preparar horários se não informados explicitamente
     const finalSchedules: Array<{
+      id?: string;
       dayOfWeek: number;
       startTime: string;
       endTime: string;
@@ -424,6 +440,7 @@ export const classService = {
             notes: classPayload.notes || null,
           },
           p_schedules: finalSchedules.map((s) => ({
+            id: s.id && isValidUUID(s.id) ? s.id : null,
             day_of_week: s.dayOfWeek,
             start_time: s.startTime,
             end_time: s.endTime,
@@ -477,10 +494,10 @@ export const classService = {
           return savedClass;
         }
       } catch (errRpc) {
-        console.warn('Aviso: RPC save_class_with_schedules_atomic falhou, aplicando fallback direto:', errRpc);
+        console.warn('Aviso: RPC save_class_with_schedules_atomic falhou, aplicando fallback direto REST:', errRpc);
       }
 
-      // 2. Fallback direto REST via tabelas class_groups e class_schedules
+      // 2. Fallback direto REST via tabelas class_groups e class_group_schedules (com tolerância adaptativa a schema)
       const classUpsertData: any = {
         tenant_id: tenantId,
         branch_id: classPayload.branchId,
@@ -504,52 +521,145 @@ export const classService = {
       }
 
       let classId = classPayload.id;
+      let targetPayload = { ...classUpsertData };
+
       if (classId && isValidUUID(classId)) {
-        const { error: updateErr } = await supabase
+        let { error: updateErr } = await supabase
           .from('class_groups')
-          .update(classUpsertData)
+          .update(targetPayload)
           .eq('id', classId)
           .eq('tenant_id', tenantId);
 
+        // Se a coluna 'notes' ou 'updated_at' não existir no banco, remove do payload e tenta novamente
+        if (updateErr && (updateErr.message?.includes('notes') || updateErr.message?.includes('updated_at') || updateErr.code === '42703')) {
+          console.warn('Aviso: Coluna notes ou updated_at ausente em class_groups. Reexecutando update sem esses campos...');
+          delete targetPayload.notes;
+          delete targetPayload.updated_at;
+          const retryRes = await supabase
+            .from('class_groups')
+            .update(targetPayload)
+            .eq('id', classId)
+            .eq('tenant_id', tenantId);
+          updateErr = retryRes.error;
+        }
+
         if (updateErr) throw new Error(`Erro ao atualizar turma no Supabase: ${updateErr.message}`);
       } else {
-        const { data: newClassData, error: insertErr } = await supabase
+        let { data: newClassData, error: insertErr } = await supabase
           .from('class_groups')
-          .insert(classUpsertData)
+          .insert(targetPayload)
           .select('id')
           .single();
+
+        // Tolerância adaptativa se notes ou updated_at não existirem ainda
+        if (insertErr && (insertErr.message?.includes('notes') || insertErr.message?.includes('updated_at') || insertErr.code === '42703')) {
+          console.warn('Aviso: Coluna notes ou updated_at ausente em class_groups. Reexecutando insert sem esses campos...');
+          delete targetPayload.notes;
+          delete targetPayload.updated_at;
+          const retryRes = await supabase
+            .from('class_groups')
+            .insert(targetPayload)
+            .select('id')
+            .single();
+          newClassData = retryRes.data;
+          insertErr = retryRes.error;
+        }
 
         if (insertErr || !newClassData) throw new Error(`Erro ao cadastrar turma no Supabase: ${insertErr?.message}`);
         classId = newClassData.id;
       }
 
-      // Sincronizar schedules
+      // Sincronizar horários estruturados preservando IDs existentes
+      let targetTable = 'class_group_schedules';
       try {
-        await supabase
-          .from('class_schedules')
-          .delete()
+        // Testar se class_group_schedules existe, senão usar class_schedules
+        const checkTest = await supabase.from(targetTable).select('id').limit(1);
+        if (checkTest.error && (checkTest.error.code === '42P01' || checkTest.error.message?.includes('does not exist'))) {
+          targetTable = 'class_schedules';
+        }
+
+        // 1. Obter horários atualmente salvos para esta turma
+        const { data: existingRows } = await supabase
+          .from(targetTable)
+          .select('id')
           .eq('class_group_id', classId)
           .eq('tenant_id', tenantId);
 
-        const schedulesToInsert = finalSchedules.map((s) => ({
-          tenant_id: tenantId,
-          class_group_id: classId,
-          day_of_week: s.dayOfWeek,
-          start_time: s.startTime,
-          end_time: s.endTime,
-          tatami_room: s.tatamiRoom || classPayload.tatamiRoom,
-          instructor_name: s.instructorName || classPayload.headInstructorName,
-          active: s.active ?? true,
-          notes: s.notes || null,
-        }));
+        const existingIds = new Set((existingRows || []).map((r: any) => r.id));
+        const retainedIds = new Set<string>();
 
-        await supabase.from('class_schedules').insert(schedulesToInsert);
+        // 2. Inserir ou atualizar individualmente para preservar IDs e integridade relacional
+        for (const s of finalSchedules) {
+          const scheduleRecord: any = {
+            tenant_id: tenantId,
+            class_group_id: classId,
+            day_of_week: s.dayOfWeek,
+            start_time: s.startTime,
+            end_time: s.endTime,
+            tatami_room: s.tatamiRoom || classPayload.tatamiRoom,
+            instructor_name: s.instructorName || classPayload.headInstructorName,
+            active: s.active ?? true,
+            notes: s.notes || null,
+          };
+
+          if (s.instructorUserId && isValidUUID(s.instructorUserId)) {
+            scheduleRecord.instructor_user_id = s.instructorUserId;
+          }
+
+          if (s.id && isValidUUID(s.id) && existingIds.has(s.id)) {
+            // Atualizar registro existente preservando o ID original
+            let { error: schedUpErr } = await supabase
+              .from(targetTable)
+              .update(scheduleRecord)
+              .eq('id', s.id)
+              .eq('tenant_id', tenantId);
+
+            if (schedUpErr && (schedUpErr.message?.includes('notes') || schedUpErr.code === '42703')) {
+              delete scheduleRecord.notes;
+              await supabase.from(targetTable).update(scheduleRecord).eq('id', s.id).eq('tenant_id', tenantId);
+            }
+            retainedIds.add(s.id);
+          } else {
+            // Inserir novo horário
+            let { data: insertedSched, error: schedInsErr } = await supabase
+              .from(targetTable)
+              .insert(scheduleRecord)
+              .select('id')
+              .single();
+
+            if (schedInsErr && (schedInsErr.message?.includes('notes') || schedInsErr.code === '42703')) {
+              delete scheduleRecord.notes;
+              const retryIns = await supabase
+                .from(targetTable)
+                .insert(scheduleRecord)
+                .select('id')
+                .single();
+              insertedSched = retryIns.data;
+            }
+
+            if (insertedSched?.id) {
+              retainedIds.add(insertedSched.id);
+            }
+          }
+        }
+
+        // 3. Excluir apenas os horários que foram explicitamente removidos pelo usuário
+        for (const oldId of existingIds) {
+          if (!retainedIds.has(oldId)) {
+            await supabase
+              .from(targetTable)
+              .delete()
+              .eq('id', oldId)
+              .eq('class_group_id', classId)
+              .eq('tenant_id', tenantId);
+          }
+        }
       } catch (errSched) {
-        console.warn('Aviso ao sincronizar horários detalhados:', errSched);
+        console.warn('Aviso ao sincronizar horários detalhados na tabela:', errSched);
       }
 
       const completeSchedules: ClassSchedule[] = finalSchedules.map((s, idx) => ({
-        id: `sched-${classId}-${idx}`,
+        id: s.id && isValidUUID(s.id) ? s.id : `sched-${classId}-${idx}`,
         tenantId,
         classGroupId: classId!,
         dayOfWeek: s.dayOfWeek,
@@ -588,7 +698,7 @@ export const classService = {
     // 3. Fallback DataStore (offline / local)
     const localClassId = classPayload.id || `class-${Date.now()}`;
     const completeSchedules: ClassSchedule[] = finalSchedules.map((s, idx) => ({
-      id: `sched-${localClassId}-${idx}`,
+      id: s.id || `sched-${localClassId}-${idx}`,
       tenantId,
       classGroupId: localClassId,
       dayOfWeek: s.dayOfWeek,

@@ -1,19 +1,20 @@
 -- ============================================================================
 -- ARQUIVO: 13_classes_schedules_and_enrollments_persistence.sql
 -- OBJETIVO: Persistência completa do módulo Turmas & Horários no TatameHub,
---           criação de horários estruturados semanais (class_schedules),
---           políticas RLS para matrículas (enrollments) e RPCs atômicas de gestão.
+--           inclusão da coluna 'notes' em class_groups, criação de horários
+--           estruturados na tabela 'class_group_schedules', políticas RLS e RPCs atômicas.
 -- ============================================================================
 
 -- 1. EXTENSÃO DA TABELA public.class_groups
+-- Adiciona a coluna 'notes' e 'updated_at' solicitadas no módulo
 ALTER TABLE public.class_groups ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE public.class_groups ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
--- Garantir índices para buscas e isolamento
+-- Índices de consulta rápida
 CREATE INDEX IF NOT EXISTS idx_classes_martial_art ON public.class_groups(tenant_id, martial_art_id);
 CREATE INDEX IF NOT EXISTS idx_classes_active ON public.class_groups(tenant_id, active);
 
--- Políticas RLS para public.class_groups (incluindo instrutores)
+-- Políticas RLS para public.class_groups (membros autenticados lêem, equipe autorizada gerencia)
 DROP POLICY IF EXISTS "classes_select" ON public.class_groups;
 CREATE POLICY "classes_select" ON public.class_groups
 FOR SELECT TO authenticated
@@ -26,9 +27,9 @@ USING (public.has_tenant_role(tenant_id, 'owner', 'branch_manager', 'secretary',
 WITH CHECK (public.has_tenant_role(tenant_id, 'owner', 'branch_manager', 'secretary', 'instructor'));
 
 -- ============================================================================
--- 2. TABELA DE HORÁRIOS ESTRUTURADOS SEMANAIS: public.class_schedules
+-- 2. TABELA DE HORÁRIOS ESTRUTURADOS: public.class_group_schedules
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS public.class_schedules (
+CREATE TABLE IF NOT EXISTS public.class_group_schedules (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
   class_group_id uuid NOT NULL REFERENCES public.class_groups(id) ON DELETE CASCADE,
@@ -45,28 +46,31 @@ CREATE TABLE IF NOT EXISTS public.class_schedules (
   CONSTRAINT chk_schedule_interval CHECK (start_time < end_time)
 );
 
-ALTER TABLE public.class_schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.class_group_schedules ENABLE ROW LEVEL SECURITY;
 
-CREATE INDEX IF NOT EXISTS idx_schedules_tenant_class ON public.class_schedules(tenant_id, class_group_id);
-CREATE INDEX IF NOT EXISTS idx_schedules_time_slot ON public.class_schedules(tenant_id, day_of_week, start_time, end_time);
-CREATE INDEX IF NOT EXISTS idx_schedules_room ON public.class_schedules(tenant_id, tatami_room);
+CREATE INDEX IF NOT EXISTS idx_schedules_tenant_class ON public.class_group_schedules(tenant_id, class_group_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_time_slot ON public.class_group_schedules(tenant_id, day_of_week, start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_schedules_room ON public.class_group_schedules(tenant_id, tatami_room);
 
--- Políticas RLS para public.class_schedules
-DROP POLICY IF EXISTS "schedules_select" ON public.class_schedules;
-CREATE POLICY "schedules_select" ON public.class_schedules
+-- Políticas RLS para public.class_group_schedules
+DROP POLICY IF EXISTS "schedules_select" ON public.class_group_schedules;
+CREATE POLICY "schedules_select" ON public.class_group_schedules
 FOR SELECT TO authenticated
 USING (public.is_tenant_member(tenant_id));
 
-DROP POLICY IF EXISTS "schedules_write_staff" ON public.class_schedules;
-CREATE POLICY "schedules_write_staff" ON public.class_schedules
+DROP POLICY IF EXISTS "schedules_write_staff" ON public.class_group_schedules;
+CREATE POLICY "schedules_write_staff" ON public.class_group_schedules
 FOR ALL TO authenticated
 USING (public.has_tenant_role(tenant_id, 'owner', 'branch_manager', 'secretary', 'instructor'))
 WITH CHECK (public.has_tenant_role(tenant_id, 'owner', 'branch_manager', 'secretary', 'instructor'));
 
+-- View de compatibilidade caso haja referências a class_schedules
+CREATE OR REPLACE VIEW public.class_schedules AS
+  SELECT * FROM public.class_group_schedules;
+
 -- ============================================================================
 -- 3. POLÍTICAS RLS PARA public.enrollments (MATRÍCULAS EM TURMAS)
 -- ============================================================================
--- A tabela public.enrollments já existe na migração 01, mas carecia de políticas RLS.
 DROP POLICY IF EXISTS "enrollments_select" ON public.enrollments;
 CREATE POLICY "enrollments_select" ON public.enrollments
 FOR SELECT TO authenticated
@@ -86,7 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_enrollments_tenant_class ON public.enrollments(te
 CREATE INDEX IF NOT EXISTS idx_enrollments_student ON public.enrollments(tenant_id, student_id, status);
 
 -- ============================================================================
--- 4. FUNÇÃO RPC ATÔMICA: SALVAR TURMA COM HORÁRIOS ESTRUTURADOS
+-- 4. FUNÇÃO RPC ATÔMICA: SALVAR TURMA COM PRESERVAÇÃO DE HORÁRIOS EXISTENTES
 -- ============================================================================
 CREATE OR REPLACE FUNCTION public.save_class_with_schedules_atomic(
   p_tenant_id uuid,
@@ -123,6 +127,7 @@ DECLARE
   v_sched_room text;
   v_sched_inst_name text;
   v_sched_inst_id uuid;
+  v_preserved_schedule_ids uuid[] := ARRAY[]::uuid[];
   v_saved_class jsonb;
   v_saved_schedules jsonb;
 BEGIN
@@ -240,11 +245,7 @@ BEGIN
     RETURNING id INTO v_class_id;
   END IF;
 
-  -- 5. Sincronizar horários estruturados em public.class_schedules
-  -- Removemos os horários antigos desta turma e reinserimos a grade atualizada
-  DELETE FROM public.class_schedules
-  WHERE class_group_id = v_class_id AND tenant_id = p_tenant_id;
-
+  -- 5. Sincronizar horários estruturados em public.class_group_schedules preservando existentes
   IF jsonb_array_length(p_schedules) > 0 THEN
     FOR v_schedule_elem IN SELECT * FROM jsonb_array_elements(p_schedules)
     LOOP
@@ -265,36 +266,100 @@ BEGIN
           USING ERRCODE = '22023';
       END IF;
 
-      INSERT INTO public.class_schedules (
-        tenant_id,
-        class_group_id,
-        day_of_week,
-        start_time,
-        end_time,
-        tatami_room,
-        instructor_user_id,
-        instructor_name,
-        active,
-        notes
-      )
-      VALUES (
-        p_tenant_id,
-        v_class_id,
-        v_sched_day,
-        v_sched_start,
-        v_sched_end,
-        v_sched_room,
-        v_sched_inst_id,
-        v_sched_inst_name,
-        COALESCE((v_schedule_elem->>'active')::boolean, true),
-        v_schedule_elem->>'notes'
-      );
+      -- Se já possuía ID e existe na tabela, atualizar
+      IF v_schedule_elem->>'id' IS NOT NULL AND length(trim(v_schedule_elem->>'id')) = 36 THEN
+        v_sched_id := (v_schedule_elem->>'id')::uuid;
+
+        UPDATE public.class_group_schedules
+        SET
+          day_of_week = v_sched_day,
+          start_time = v_sched_start,
+          end_time = v_sched_end,
+          tatami_room = v_sched_room,
+          instructor_user_id = v_sched_inst_id,
+          instructor_name = v_sched_inst_name,
+          active = COALESCE((v_schedule_elem->>'active')::boolean, true),
+          notes = v_schedule_elem->>'notes',
+          updated_at = now()
+        WHERE id = v_sched_id AND class_group_id = v_class_id AND tenant_id = p_tenant_id;
+
+        IF FOUND THEN
+          v_preserved_schedule_ids := array_append(v_preserved_schedule_ids, v_sched_id);
+        ELSE
+          -- Se não encontrou por ID nesta turma, inserir como novo
+          INSERT INTO public.class_group_schedules (
+            tenant_id,
+            class_group_id,
+            day_of_week,
+            start_time,
+            end_time,
+            tatami_room,
+            instructor_user_id,
+            instructor_name,
+            active,
+            notes
+          )
+          VALUES (
+            p_tenant_id,
+            v_class_id,
+            v_sched_day,
+            v_sched_start,
+            v_sched_end,
+            v_sched_room,
+            v_sched_inst_id,
+            v_sched_inst_name,
+            COALESCE((v_schedule_elem->>'active')::boolean, true),
+            v_schedule_elem->>'notes'
+          )
+          RETURNING id INTO v_sched_id;
+
+          v_preserved_schedule_ids := array_append(v_preserved_schedule_ids, v_sched_id);
+        END IF;
+      ELSE
+        -- Novo horário
+        INSERT INTO public.class_group_schedules (
+          tenant_id,
+          class_group_id,
+          day_of_week,
+          start_time,
+          end_time,
+          tatami_room,
+          instructor_user_id,
+          instructor_name,
+          active,
+          notes
+        )
+        VALUES (
+          p_tenant_id,
+          v_class_id,
+          v_sched_day,
+          v_sched_start,
+          v_sched_end,
+          v_sched_room,
+          v_sched_inst_id,
+          v_sched_inst_name,
+          COALESCE((v_schedule_elem->>'active')::boolean, true),
+          v_schedule_elem->>'notes'
+        )
+        RETURNING id INTO v_sched_id;
+
+        v_preserved_schedule_ids := array_append(v_preserved_schedule_ids, v_sched_id);
+      END IF;
     END LOOP;
+
+    -- Deletar apenas os horários que foram explicitamente removidos pelo usuário
+    DELETE FROM public.class_group_schedules
+    WHERE class_group_id = v_class_id 
+      AND tenant_id = p_tenant_id
+      AND NOT (id = ANY(v_preserved_schedule_ids));
   ELSE
-    -- Caso nenhum schedule detalhado tenha sido informado, gerar a partir de days_of_week
+    -- Caso nenhum schedule detalhado tenha sido informado, derivar de days_of_week
+    DELETE FROM public.class_group_schedules
+    WHERE class_group_id = v_class_id AND tenant_id = p_tenant_id;
+
     FOREACH v_sched_day IN ARRAY v_days_of_week
     LOOP
-      INSERT INTO public.class_schedules (
+      INSERT INTO public.class_group_schedules (
         tenant_id,
         class_group_id,
         day_of_week,
@@ -341,7 +406,7 @@ BEGIN
 
   -- 7. Retorno estruturado
   SELECT to_jsonb(cg) INTO v_saved_class FROM public.class_groups cg WHERE id = v_class_id;
-  SELECT jsonb_agg(to_jsonb(cs)) INTO v_saved_schedules FROM public.class_schedules cs WHERE class_group_id = v_class_id;
+  SELECT jsonb_agg(to_jsonb(cs)) INTO v_saved_schedules FROM public.class_group_schedules cs WHERE class_group_id = v_class_id;
 
   RETURN jsonb_build_object(
     'success', true,
