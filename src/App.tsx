@@ -188,13 +188,17 @@ export default function App() {
       const result = await studentService.fetchStudentsWithDetails(currentTenantId);
       if (result) {
         setStudents(result.students);
+        DataStore.saveStudents(result.students);
         setPersons((prev) => {
           const nonStudentPersons = prev.filter(
             (p) => !result.persons.some((rp) => rp.id === p.id)
           );
-          return [...result.persons, ...nonStudentPersons];
+          const next = [...result.persons, ...nonStudentPersons];
+          DataStore.savePersons(next);
+          return next;
         });
         setGuardians(result.guardians);
+        DataStore.saveGuardianRelationships(result.guardians);
       }
     } catch (err) {
       console.warn('Erro ao atualizar dados do banco:', err);
