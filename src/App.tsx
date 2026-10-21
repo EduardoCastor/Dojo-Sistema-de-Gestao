@@ -62,6 +62,7 @@ import { PlatformAdminView } from './components/superadmin/PlatformAdminView';
 // Supabase Real-Time & Auth Services
 import { supabase, authService, isSupabaseConfigured, UserMembership } from './services/supabase';
 import { studentService, CreateStudentPayload, UpdateStudentPayload, isValidUUID } from './services/studentService';
+import { classService } from './services/classService';
 
 export default function App() {
   // App view navigation
@@ -163,6 +164,20 @@ export default function App() {
         } catch (mErr) {
           console.warn('Aviso ao sincronizar modalidades/faixas do Supabase:', mErr);
         }
+
+        // Sincronizar turmas e horários reais da academia ativa
+        try {
+          const [loadedClasses, loadedEnrollments] = await Promise.all([
+            classService.fetchClasses(currentTenantId),
+            classService.fetchEnrollments(currentTenantId),
+          ]);
+          if (isMounted) {
+            if (loadedClasses && loadedClasses.length > 0) setClasses(loadedClasses);
+            if (loadedEnrollments) setEnrollments(loadedEnrollments);
+          }
+        } catch (cErr) {
+          console.warn('Aviso ao sincronizar turmas/matrículas do Supabase:', cErr);
+        }
       } catch (err) {
         console.warn('Erro ao sincronizar alunos do banco:', err);
       } finally {
@@ -185,7 +200,11 @@ export default function App() {
     }
     setIsLoadingStudents(true);
     try {
-      const result = await studentService.fetchStudentsWithDetails(currentTenantId);
+      const [result, loadedClasses, loadedEnrollments] = await Promise.all([
+        studentService.fetchStudentsWithDetails(currentTenantId),
+        classService.fetchClasses(currentTenantId),
+        classService.fetchEnrollments(currentTenantId),
+      ]);
       if (result) {
         setStudents(result.students);
         DataStore.saveStudents(result.students);
@@ -200,10 +219,28 @@ export default function App() {
         setGuardians(result.guardians);
         DataStore.saveGuardianRelationships(result.guardians);
       }
+      if (loadedClasses && loadedClasses.length > 0) setClasses(loadedClasses);
+      if (loadedEnrollments) setEnrollments(loadedEnrollments);
     } catch (err) {
       console.warn('Erro ao atualizar dados do banco:', err);
     } finally {
       setIsLoadingStudents(false);
+    }
+  };
+
+  const handleRefreshClasses = async () => {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(currentTenantId)) {
+      return;
+    }
+    try {
+      const [loadedClasses, loadedEnrollments] = await Promise.all([
+        classService.fetchClasses(currentTenantId),
+        classService.fetchEnrollments(currentTenantId),
+      ]);
+      if (loadedClasses) setClasses(loadedClasses);
+      if (loadedEnrollments) setEnrollments(loadedEnrollments);
+    } catch (err) {
+      console.warn('Erro ao atualizar turmas/matrículas do Supabase:', err);
     }
   };
 
@@ -929,18 +966,21 @@ export default function App() {
 
   // Handlers for Classes
   const handleAddClass = (newClass: ClassGroup) => {
-    const updated = [...classes, newClass];
-    DataStore.saveClasses(updated);
-    setClasses(updated);
+    setClasses((prev) => {
+      const exists = prev.some((c) => c.id === newClass.id);
+      const updated = exists ? prev.map((c) => (c.id === newClass.id ? newClass : c)) : [newClass, ...prev];
+      DataStore.saveClasses(updated);
+      return updated;
+    });
 
     DataStore.logAudit(
       currentTenantId,
       currentUser.id,
       currentUser.name,
-      'Criação de Turma',
+      'Criação/Edição de Turma',
       'ClassGroup',
       newClass.id,
-      `Nova turma ${newClass.name} criada no ${newClass.tatamiRoom}.`
+      `Turma ${newClass.name} salva no ${newClass.tatamiRoom}.`
     );
   };
 
@@ -1183,9 +1223,16 @@ export default function App() {
               classes={classes}
               enrollments={enrollments}
               martialArts={martialArts}
+              beltRanks={beltRanks}
+              students={students}
+              persons={persons}
+              branches={branches}
               instructors={users.filter(u => u.role === 'instructor' || u.role === 'owner')}
+              tenantId={currentTenantId}
+              tenantName={activeTenant.tradeName}
               onOpenAttendance={(cls) => setSelectedClassForAttendance(cls)}
               onAddClass={handleAddClass}
+              onRefreshData={handleRefreshClasses}
             />
           )}
 
@@ -1201,9 +1248,16 @@ export default function App() {
                 classes={classes}
                 enrollments={enrollments}
                 martialArts={martialArts}
+                beltRanks={beltRanks}
+                students={students}
+                persons={persons}
+                branches={branches}
                 instructors={users.filter(u => u.role === 'instructor' || u.role === 'owner')}
+                tenantId={currentTenantId}
+                tenantName={activeTenant.tradeName}
                 onOpenAttendance={(cls) => setSelectedClassForAttendance(cls)}
                 onAddClass={handleAddClass}
+                onRefreshData={handleRefreshClasses}
               />
             </div>
           )}

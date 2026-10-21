@@ -218,13 +218,28 @@ export interface Student {
   notes?: string;
 }
 
+export interface ClassSchedule {
+  id: string;
+  tenantId: string;
+  classGroupId: string;
+  dayOfWeek: number; // 0: Dom, 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sáb
+  startTime: string; // "18:00"
+  endTime: string; // "19:15"
+  tatamiRoom: string;
+  instructorUserId?: string;
+  instructorName?: string;
+  active: boolean;
+  notes?: string;
+  createdAt?: string;
+}
+
 export interface ClassGroup {
   id: string;
   tenantId: string;
   branchId: string;
   martialArtId: string;
   name: string;
-  headInstructorId: string;
+  headInstructorId?: string;
   headInstructorName: string;
   daysOfWeek: number[]; // 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sab, 0: Dom
   startTime: string; // "18:00"
@@ -235,6 +250,10 @@ export interface ClassGroup {
   allowedBeltRanks?: string[];
   tatamiRoom: string;
   active: boolean;
+  notes?: string;
+  schedules?: ClassSchedule[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Enrollment {
