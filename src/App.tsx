@@ -44,6 +44,8 @@ import { GuardiansView } from './components/admin/GuardiansView';
 import { StudentFormModal } from './components/admin/StudentFormModal';
 import { ModalitiesView } from './components/admin/ModalitiesView';
 import { ClassesView } from './components/admin/ClassesView';
+import { AttendanceView } from './components/admin/AttendanceView';
+import { TatamiOccupancyView } from './components/admin/TatamiOccupancyView';
 import { AttendanceModal } from './components/admin/AttendanceModal';
 import { FinancialView } from './components/admin/FinancialView';
 import { DigitalLibraryView } from './components/admin/DigitalLibraryView';
@@ -63,6 +65,7 @@ import { PlatformAdminView } from './components/superadmin/PlatformAdminView';
 import { supabase, authService, isSupabaseConfigured, UserMembership } from './services/supabase';
 import { studentService, CreateStudentPayload, UpdateStudentPayload, isValidUUID } from './services/studentService';
 import { classService } from './services/classService';
+import { attendanceService } from './services/attendanceService';
 
 export default function App() {
   // App view navigation
@@ -165,18 +168,20 @@ export default function App() {
           console.warn('Aviso ao sincronizar modalidades/faixas do Supabase:', mErr);
         }
 
-        // Sincronizar turmas e horários reais da academia ativa
+        // Sincronizar turmas, horários e frequência reais da academia ativa
         try {
-          const [loadedClasses, loadedEnrollments] = await Promise.all([
+          const [loadedClasses, loadedEnrollments, loadedAttendances] = await Promise.all([
             classService.fetchClasses(currentTenantId),
             classService.fetchEnrollments(currentTenantId),
+            attendanceService.fetchAttendances(currentTenantId),
           ]);
           if (isMounted) {
             if (loadedClasses && loadedClasses.length > 0) setClasses(loadedClasses);
             if (loadedEnrollments) setEnrollments(loadedEnrollments);
+            if (loadedAttendances && loadedAttendances.length > 0) setAttendances(loadedAttendances);
           }
         } catch (cErr) {
-          console.warn('Aviso ao sincronizar turmas/matrículas do Supabase:', cErr);
+          console.warn('Aviso ao sincronizar turmas/matrículas/frequência do Supabase:', cErr);
         }
       } catch (err) {
         console.warn('Erro ao sincronizar alunos do banco:', err);
@@ -759,8 +764,45 @@ export default function App() {
   };
 
   // Handlers for Attendance
-  const handleSaveAttendance = (records: AttendanceRecord[]) => {
-    const updated = [...records, ...attendances];
+  const handleRefreshAttendance = async () => {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(currentTenantId)) {
+      setAttendances(DataStore.getAttendances(currentTenantId));
+      return;
+    }
+    try {
+      const fresh = await attendanceService.fetchAttendances(currentTenantId);
+      if (fresh) {
+        setAttendances(fresh);
+      }
+    } catch (err) {
+      console.warn('Erro ao atualizar chamadas:', err);
+    }
+  };
+
+  const handleSaveAttendance = async (records: AttendanceRecord[]) => {
+    if (selectedClassForAttendance && isSupabaseConfigured() && supabase && isValidUUID(currentTenantId)) {
+      try {
+        await attendanceService.saveAttendance({
+          tenantId: currentTenantId,
+          classGroupId: selectedClassForAttendance.id,
+          date: records[0]?.date || new Date().toISOString().split('T')[0],
+          startTime: selectedClassForAttendance.startTime,
+          endTime: selectedClassForAttendance.endTime,
+          instructorName: selectedClassForAttendance.headInstructorName,
+          sessionStatus: 'completed',
+          records: records.map((r) => ({
+            studentId: r.studentId,
+            status: r.status,
+            notes: r.notes,
+          })),
+          currentUser,
+        });
+      } catch (err) {
+        console.warn('Aviso: falha ao salvar chamada no Supabase via modal (salvando localmente):', err);
+      }
+    }
+
+    const updated = [...records, ...attendances.filter(a => !(a.classGroupId === selectedClassForAttendance?.id && a.date === records[0]?.date))];
     DataStore.saveAttendances(updated);
     setAttendances(updated);
 
@@ -1230,36 +1272,48 @@ export default function App() {
               instructors={users.filter(u => u.role === 'instructor' || u.role === 'owner')}
               tenantId={currentTenantId}
               tenantName={activeTenant.tradeName}
-              onOpenAttendance={(cls) => setSelectedClassForAttendance(cls)}
+              onOpenAttendance={(cls) => {
+                setSelectedClassForAttendance(cls);
+                setAdminTab('attendance');
+              }}
               onAddClass={handleAddClass}
               onRefreshData={handleRefreshClasses}
+              onNavigateToOccupancy={() => setAdminTab('tatami_occupancy')}
             />
           )}
 
           {adminTab === 'attendance' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-white tracking-tight">Controle de Frequência & Chamadas</h2>
-                  <p className="text-xs text-slate-400">Selecione uma turma para realizar a chamada oficial do Sensei.</p>
-                </div>
-              </div>
-              <ClassesView
-                classes={classes}
-                enrollments={enrollments}
-                martialArts={martialArts}
-                beltRanks={beltRanks}
-                students={students}
-                persons={persons}
-                branches={branches}
-                instructors={users.filter(u => u.role === 'instructor' || u.role === 'owner')}
-                tenantId={currentTenantId}
-                tenantName={activeTenant.tradeName}
-                onOpenAttendance={(cls) => setSelectedClassForAttendance(cls)}
-                onAddClass={handleAddClass}
-                onRefreshData={handleRefreshClasses}
-              />
-            </div>
+            <AttendanceView
+              classes={classes}
+              enrollments={enrollments}
+              students={students}
+              persons={persons}
+              martialArts={martialArts}
+              beltRanks={beltRanks}
+              branches={branches}
+              currentUser={currentUser}
+              tenantId={currentTenantId}
+              tenantName={activeTenant.tradeName}
+              initialClassGroup={selectedClassForAttendance}
+              onRefreshData={handleRefreshAttendance}
+              onNavigateToClasses={() => setAdminTab('classes')}
+            />
+          )}
+
+          {adminTab === 'tatami_occupancy' && (
+            <TatamiOccupancyView
+              classes={classes}
+              martialArts={martialArts}
+              instructors={users.filter(u => u.role === 'instructor' || u.role === 'owner')}
+              branches={tenantBranches}
+              currentBranchId={currentBranchId}
+              tenantName={activeTenant.tradeName}
+              onOpenAttendance={(cls) => {
+                setSelectedClassForAttendance(cls);
+                setAdminTab('attendance');
+              }}
+              onNavigateToClasses={() => setAdminTab('classes')}
+            />
           )}
 
           {adminTab === 'financial' && (

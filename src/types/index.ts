@@ -266,15 +266,38 @@ export interface Enrollment {
   status: 'active' | 'paused' | 'canceled';
 }
 
+export interface ClassSession {
+  id: string;
+  tenantId: string;
+  classGroupId: string;
+  sessionDate: string; // YYYY-MM-DD
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
+  instructorUserId?: string;
+  instructorName?: string;
+  status: 'open' | 'completed' | 'canceled';
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  // Métricas agregadas
+  presentCount?: number;
+  absentCount?: number;
+  lateCount?: number;
+  excusedCount?: number;
+  totalStudents?: number;
+}
+
 export interface AttendanceRecord {
   id: string;
   tenantId: string;
   classGroupId: string;
+  sessionId?: string;
   studentId: string;
   date: string; // YYYY-MM-DD
-  status: 'present' | 'absent' | 'excused';
+  status: 'present' | 'absent' | 'late' | 'excused';
   notes?: string;
   recordedByUserName: string;
+  recordedByUserId?: string;
   recordedAt: string;
 }
 

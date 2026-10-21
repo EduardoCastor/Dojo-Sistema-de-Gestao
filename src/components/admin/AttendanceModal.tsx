@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Check, CheckCircle2, XCircle, AlertCircle, Calendar } from 'lucide-react';
+import { X, Check, CheckCircle2, XCircle, AlertCircle, Calendar, Clock } from 'lucide-react';
 import { ClassGroup, Student, Person, Enrollment, AttendanceRecord, User } from '../../types';
 
 interface AttendanceModalProps {
@@ -33,8 +33,8 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   const classStudents = students.filter(s => enrolledStudentIds.includes(s.id));
 
   // Attendance state map
-  const [statusMap, setStatusMap] = useState<Record<string, { status: 'present' | 'absent' | 'excused'; notes?: string }>>(() => {
-    const initial: Record<string, { status: 'present' | 'absent' | 'excused'; notes?: string }> = {};
+  const [statusMap, setStatusMap] = useState<Record<string, { status: 'present' | 'absent' | 'late' | 'excused'; notes?: string }>>(() => {
+    const initial: Record<string, { status: 'present' | 'absent' | 'late' | 'excused'; notes?: string }> = {};
     classStudents.forEach(s => {
       initial[s.id] = { status: 'present' };
     });
@@ -43,7 +43,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleStatusChange = (studentId: string, status: 'present' | 'absent' | 'excused') => {
+  const handleStatusChange = (studentId: string, status: 'present' | 'absent' | 'late' | 'excused') => {
     setStatusMap(prev => ({
       ...prev,
       [studentId]: { ...prev[studentId], status },
@@ -58,7 +58,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   };
 
   const markAll = (status: 'present' | 'absent') => {
-    const updated: Record<string, { status: 'present' | 'absent' | 'excused'; notes?: string }> = {};
+    const updated: Record<string, { status: 'present' | 'absent' | 'late' | 'excused'; notes?: string }> = {};
     classStudents.forEach(s => {
       updated[s.id] = { status };
     });
@@ -196,10 +196,23 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
 
                       <button
                         type="button"
+                        onClick={() => handleStatusChange(s.id, 'late')}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+                          currentStatus === 'late'
+                            ? 'bg-amber-600 text-white shadow-sm'
+                            : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Clock className="h-3 w-3" />
+                        <span>Atraso</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => handleStatusChange(s.id, 'excused')}
                         className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
                           currentStatus === 'excused'
-                            ? 'bg-amber-600 text-white shadow-sm'
+                            ? 'bg-sky-600 text-white shadow-sm'
                             : 'bg-slate-800 text-slate-400 hover:text-slate-200'
                         }`}
                       >

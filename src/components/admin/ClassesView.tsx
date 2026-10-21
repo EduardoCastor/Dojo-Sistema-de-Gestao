@@ -21,6 +21,7 @@ import {
   ChevronRight,
   ShieldAlert,
   Info,
+  LayoutGrid,
 } from 'lucide-react';
 import { ClassGroup, ClassSchedule, Enrollment, MartialArt, BeltRank, Student, Person, User, Branch } from '../../types';
 import { getDaysOfWeekLabels, formatCPF } from '../../utils/formatters';
@@ -40,6 +41,7 @@ interface ClassesViewProps {
   onOpenAttendance: (classGroup: ClassGroup) => void;
   onAddClass?: (newClass: ClassGroup) => void;
   onRefreshData?: () => Promise<void>;
+  onNavigateToOccupancy?: () => void;
 }
 
 const DAYS_OPTIONS = [
@@ -66,6 +68,7 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
   onOpenAttendance,
   onAddClass,
   onRefreshData,
+  onNavigateToOccupancy,
 }) => {
   // Navegação por abas
   const [activeTab, setActiveTab] = useState<'grid' | 'schedule_report' | 'graduation_report'>('grid');
@@ -693,6 +696,16 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
           <Award className="h-4 w-4 text-red-500" />
           <span>Relatório por Graduação</span>
         </button>
+
+        {onNavigateToOccupancy && (
+          <button
+            onClick={onNavigateToOccupancy}
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-white hover:border-red-500/50 transition-colors cursor-pointer"
+          >
+            <LayoutGrid className="h-4 w-4 text-emerald-400" />
+            <span>Ocupação dos Tatamis</span>
+          </button>
+        )}
       </div>
 
       {/* ABA 1: GRADE DE TURMAS */}

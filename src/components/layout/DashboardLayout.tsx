@@ -20,6 +20,7 @@ import {
   Menu,
   X,
   UserCheck,
+  LayoutGrid,
 } from 'lucide-react';
 import { User, Tenant, Branch } from '../../types';
 
@@ -30,6 +31,7 @@ export type AdminViewTab =
   | 'modalities'
   | 'classes'
   | 'attendance'
+  | 'tatami_occupancy'
   | 'financial'
   | 'library'
   | 'exams'
@@ -85,6 +87,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
     { id: 'modalities', label: 'Modalidades & Faixas', icon: Award },
     { id: 'classes', label: 'Turmas & Horários', icon: Calendar },
     { id: 'attendance', label: 'Controle de Frequência', icon: CheckSquare },
+    { id: 'tatami_occupancy', label: 'Ocupação dos Tatamis', icon: LayoutGrid },
     { id: 'financial', label: 'Mensalidades & Finanças', icon: DollarSign },
     { id: 'library', label: 'Biblioteca Digital', icon: BookOpen },
     { id: 'exams', label: 'Exames de Graduação', icon: FileCheck2 },
