@@ -227,8 +227,8 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
 
       setSuccessMsg(
         isEditing
-          ? 'Dados do responsável atualizados com sucesso no banco de dados!'
-          : 'Responsável cadastrado com sucesso no banco de dados!'
+          ? 'Dados do responsável atualizados com sucesso!'
+          : 'Responsável cadastrado com sucesso!'
       );
 
       setTimeout(() => {
@@ -521,7 +521,7 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Salvando no Supabase...</span>
+                  <span>Salvando informações...</span>
                 </>
               ) : (
                 <>

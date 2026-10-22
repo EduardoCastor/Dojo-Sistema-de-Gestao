@@ -214,7 +214,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
       });
 
       setIsExistingSession(true);
-      setSuccessMessage('Chamada salva com sucesso no Supabase!');
+      setSuccessMessage('Chamada salva com sucesso!');
 
       // Notificar componentes pais
       if (onSaveAttendance) {
@@ -231,7 +231,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
     } catch (err: any) {
       console.error('Falha ao salvar chamada no modal:', err);
       setErrorMessage(
-        err?.message || 'Erro ao persistir chamada no Supabase. Verifique suas permissões de acesso.'
+        err?.message || 'Não foi possível salvar a chamada. Verifique suas permissões e tente novamente.'
       );
     } finally {
       setIsSaving(false);
@@ -322,7 +322,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         {isLoading ? (
           <div className="p-10 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs">
             <Loader2 className="h-6 w-6 animate-spin text-red-500" />
-            <span>Consultando frequência no Supabase...</span>
+            <span>Carregando dados de frequência...</span>
           </div>
         ) : classStudents.length === 0 ? (
           <div className="p-8 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-xl mb-6">
@@ -466,7 +466,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Salvando no Supabase...</span>
+                  <span>Salvando chamada...</span>
                 </>
               ) : (
                 <>

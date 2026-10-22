@@ -88,7 +88,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
     { id: 'classes', label: 'Turmas & Horários', icon: Calendar },
     { id: 'attendance', label: 'Controle de Frequência', icon: CheckSquare },
     { id: 'tatami_occupancy', label: 'Gerenciador de Tatamis', icon: LayoutGrid },
-    { id: 'financial', label: 'Mensalidades & Finanças', icon: DollarSign },
+    { id: 'financial', label: 'Mensalidades e Finanças', icon: DollarSign },
     { id: 'library', label: 'Biblioteca Digital', icon: BookOpen },
     { id: 'exams', label: 'Exames de Graduação', icon: FileCheck2 },
     { id: 'competitions', label: 'Competições & Medalhas', icon: Trophy },

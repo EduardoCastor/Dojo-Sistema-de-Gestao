@@ -164,7 +164,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       });
 
       onUpdatePerson?.(updated);
-      setEditGSuccess('Dados do responsável atualizados com sucesso no banco!');
+      setEditGSuccess('Dados do responsável atualizados com sucesso!');
       setTimeout(() => {
         setEditingGuardian(null);
       }, 1000);
@@ -1097,7 +1097,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white">Editar Responsável</h3>
                 <p className="text-xs text-slate-400">
-                  Atualize os dados cadastrais da pessoa física no banco de dados.
+                  Atualize os dados cadastrais da pessoa física.
                 </p>
               </div>
             </div>

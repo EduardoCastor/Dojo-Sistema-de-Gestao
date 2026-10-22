@@ -359,7 +359,7 @@ export const GuardiansView: React.FC<GuardiansViewProps> = ({
         <div className="p-4 rounded-xl border border-red-500/40 bg-red-950/60 text-red-200 text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
-            <span>Erro ao consultar responsáveis no Supabase: {error}</span>
+            <span>Não foi possível carregar a lista de responsáveis. {error}</span>
           </div>
           {onRefreshData && (
             <button
@@ -376,7 +376,7 @@ export const GuardiansView: React.FC<GuardiansViewProps> = ({
       {isLoading ? (
         <div className="p-16 text-center text-slate-400 rounded-xl border border-slate-800 bg-slate-900/40 flex flex-col items-center justify-center gap-3">
           <Loader2 className="h-7 w-7 animate-spin text-red-500" />
-          <span className="text-xs">Carregando lista de responsáveis do Supabase...</span>
+          <span className="text-xs">Carregando lista de responsáveis...</span>
         </div>
       ) : filteredAndSortedGuardians.length === 0 ? (
         /* Estado Vazio */

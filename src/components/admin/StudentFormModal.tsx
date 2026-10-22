@@ -1639,7 +1639,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                                 {link.relationship.relationshipLabel}
                               </span>
                               <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-950 text-emerald-400 border border-emerald-500/30">
-                                Gravado no Banco ✓
+                                Salvo ✓
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex gap-2">
@@ -1962,7 +1962,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>{isEditing ? 'Atualizando no Banco...' : 'Gravando no Banco...'}</span>
+                  <span>{isEditing ? 'Salvando alterações...' : 'Cadastrando aluno...'}</span>
                 </>
               ) : (
                 <>

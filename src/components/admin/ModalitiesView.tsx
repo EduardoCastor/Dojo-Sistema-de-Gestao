@@ -389,7 +389,7 @@ export const ModalitiesView: React.FC<ModalitiesViewProps> = ({
         selectedArtId,
         reindexedBelts.map((b) => b.id)
       );
-      showFeedback('success', 'Ordem das faixas atualizada e sincronizada com o Supabase.');
+      showFeedback('success', 'Ordem das faixas atualizada com sucesso.');
       if (onRefresh) onRefresh();
     } catch (err: any) {
       console.warn('Falha ao persistir reordenação no Supabase:', err);
@@ -466,7 +466,7 @@ export const ModalitiesView: React.FC<ModalitiesViewProps> = ({
             <span>Modalidades & Sistema de Graduações</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Gerencie as artes marciais praticadas no dojo, seus critérios pedagógicos e a sequência progressiva de faixas no Supabase.
+            Gerencie as artes marciais praticadas no dojo, seus critérios pedagógicos e a sequência progressiva de faixas.
           </p>
         </div>
 
@@ -1125,7 +1125,7 @@ export const ModalitiesView: React.FC<ModalitiesViewProps> = ({
               Tem certeza que deseja excluir <strong>"{itemToDelete.name}"</strong>?
               {itemToDelete.type === 'art' && (
                 <span className="block mt-2 text-red-400 font-semibold">
-                  Atenção: todas as faixas e graduações associadas a esta modalidade serão removidas em cascata no banco de dados.
+                  Atenção: todas as faixas e graduações associadas a esta modalidade serão removidas definitivamente.
                 </span>
               )}
             </p>

@@ -342,6 +342,8 @@ export interface Invoice {
   branchId: string;
   studentId: string;
   financialGuardianId?: string;
+  planId?: string;
+  classGroupId?: string;
   competence: string; // "10/2026"
   issueDate: string;
   dueDate: string;
@@ -357,11 +359,112 @@ export interface Invoice {
   paymentMethod?: 'pix' | 'boleto' | 'credit_card' | 'cash';
   pixCode?: string;
   receiptNumber?: string;
+  notes?: string;
   auditTrail: {
     date: string;
     action: string;
     userName: string;
   }[];
+}
+
+export interface MembershipPlan {
+  id: string;
+  tenantId: string;
+  branchId?: string;
+  name: string;
+  amount: number;
+  frequency: 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+  dueDay: number; // 1 to 31
+  discountPercentage?: number;
+  discountDescription?: string;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateMembershipPlanPayload {
+  tenantId: string;
+  branchId?: string;
+  name: string;
+  amount: number;
+  frequency?: 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+  dueDay: number;
+  discountPercentage?: number;
+  discountDescription?: string;
+  active?: boolean;
+}
+
+export interface FinancialTransaction {
+  id: string;
+  tenantId: string;
+  branchId?: string;
+  type: 'income' | 'expense';
+  category: 'competition' | 'merchandise' | 'exam' | 'event' | 'administrative' | 'facilities' | 'payroll' | 'other';
+  description: string;
+  amount: number;
+  competence: string; // "10/2026"
+  dueDate?: string;
+  paymentDate?: string;
+  status: 'pending' | 'completed' | 'canceled';
+  studentId?: string;
+  guardianPersonId?: string;
+  classGroupId?: string;
+  quantity?: number;
+  unitPrice?: number;
+  paymentMethod?: 'pix' | 'boleto' | 'credit_card' | 'cash' | 'transfer';
+  notes?: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateTransactionPayload {
+  tenantId: string;
+  branchId?: string;
+  type: 'income' | 'expense';
+  category: FinancialTransaction['category'];
+  description: string;
+  amount: number;
+  competence: string;
+  dueDate?: string;
+  paymentDate?: string;
+  status?: 'pending' | 'completed' | 'canceled';
+  studentId?: string;
+  guardianPersonId?: string;
+  classGroupId?: string;
+  quantity?: number;
+  unitPrice?: number;
+  paymentMethod?: FinancialTransaction['paymentMethod'];
+  notes?: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
+}
+
+export interface PaymentReminder {
+  id: string;
+  tenantId: string;
+  invoiceId: string;
+  recipientEmail: string;
+  recipientName: string;
+  recipientType: 'student' | 'financial_guardian';
+  subject: string;
+  bodySnippet: string;
+  sentAt: string;
+  status: 'sent' | 'failed' | 'preview';
+  providerResponse?: string;
+  sentByUserId?: string;
+}
+
+export interface SendReminderPayload {
+  tenantId: string;
+  invoiceId: string;
+  recipientEmail: string;
+  recipientName: string;
+  recipientType: 'student' | 'financial_guardian';
+  subject: string;
+  body: string;
+  sentByUserId?: string;
 }
 
 export interface DigitalLibraryItem {

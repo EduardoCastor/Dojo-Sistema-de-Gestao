@@ -21,6 +21,9 @@ import {
   AuditLog,
   SaaSPlan,
   Tatami,
+  MembershipPlan,
+  FinancialTransaction,
+  PaymentReminder,
 } from '../types';
 
 import {
@@ -43,9 +46,12 @@ import {
   INITIAL_COMPETITIONS,
   INITIAL_COMPETITION_ATHLETES,
   INITIAL_AUDIT_LOGS,
-  INITIAL_MARTIAL_ARTS,
   INITIAL_BELT_RANKS,
+  INITIAL_MARTIAL_ARTS,
   INITIAL_TATAMIS,
+  INITIAL_MEMBERSHIP_PLANS,
+  INITIAL_FINANCIAL_TRANSACTIONS,
+  INITIAL_PAYMENT_REMINDERS,
 } from './initialData';
 
 const STORAGE_PREFIX = 'tatamehub_';
@@ -212,6 +218,35 @@ export class DataStore {
 
   static saveInvoices(invoices: Invoice[]): void {
     save('invoices', invoices);
+  }
+
+  static getMembershipPlans(tenantId: string): MembershipPlan[] {
+    const all = load('membership_plans', INITIAL_MEMBERSHIP_PLANS);
+    const filtered = all.filter(p => p.tenantId === tenantId);
+    return filtered.length > 0 ? filtered : all.filter(p => p.tenantId === 'tenant-kodokan');
+  }
+
+  static saveMembershipPlans(plans: MembershipPlan[]): void {
+    save('membership_plans', plans);
+  }
+
+  static getFinancialTransactions(tenantId: string): FinancialTransaction[] {
+    const all = load('financial_transactions', INITIAL_FINANCIAL_TRANSACTIONS);
+    const filtered = all.filter(t => t.tenantId === tenantId);
+    return filtered.length > 0 ? filtered : all.filter(t => t.tenantId === 'tenant-kodokan');
+  }
+
+  static saveFinancialTransactions(txs: FinancialTransaction[]): void {
+    save('financial_transactions', txs);
+  }
+
+  static getPaymentReminders(tenantId: string): PaymentReminder[] {
+    const all = load('payment_reminders', INITIAL_PAYMENT_REMINDERS);
+    return all.filter(r => r.tenantId === tenantId);
+  }
+
+  static savePaymentReminders(reminders: PaymentReminder[]): void {
+    save('payment_reminders', reminders);
   }
 
   static getLibraryItems(tenantId: string): DigitalLibraryItem[] {

@@ -196,7 +196,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           }
         }
 
-        setSuccessMessage('Academia e filial matriz cadastradas com sucesso no banco de dados!');
+        setSuccessMessage('Academia e filial matriz cadastradas com sucesso!');
         setLoading(false);
 
         // 7. Notifica o componente pai para carregar o painel administrativo com os dados reais

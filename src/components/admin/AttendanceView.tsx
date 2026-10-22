@@ -260,7 +260,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       setIsExistingSession(true);
       setFeedbackMessage({
         type: 'success',
-        text: `Chamada da turma "${selectedClass.name}" para ${selectedDate} salva com sucesso no Supabase!`,
+        text: `Chamada da turma "${selectedClass.name}" para ${selectedDate} salva com sucesso!`,
       });
 
       if (onRefreshData) {
@@ -272,7 +272,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       console.error('Falha ao salvar chamada:', err);
       setFeedbackMessage({
         type: 'error',
-        text: err?.message || 'Erro ao persistir chamada no Supabase.',
+        text: err?.message || 'Não foi possível salvar a chamada. Tente novamente.',
       });
     } finally {
       setIsSaving(false);
@@ -524,7 +524,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
               Controle de Frequência & Chamadas
             </h1>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-950/60 border border-red-500/30 text-red-400">
-              Persistência Supabase
+              Frequência Diária
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
@@ -736,17 +736,17 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                 {isLoadingSession ? (
                   <span className="flex items-center gap-1.5 text-slate-400 text-xs">
                     <RefreshCw className="h-3.5 w-3.5 animate-spin text-red-500" />
-                    Consultando Supabase...
+                    Carregando chamada...
                   </span>
                 ) : isExistingSession ? (
                   <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold">
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                    Chamada Registrada no Banco
+                    Chamada Realizada
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-950/70 border border-amber-500/40 text-amber-300 text-[11px] font-semibold">
                     <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
-                    Nova Chamada (Não Gravada)
+                    Nova Chamada (Não Registrada)
                   </span>
                 )}
               </div>
@@ -903,7 +903,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
               <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
                 <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                Gravação atômica direta no Supabase com isolamento por <code className="text-slate-300">tenant_id</code>.
+                Presença e histórico de treinos registrados com segurança.
               </div>
 
               <button
@@ -915,12 +915,12 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                 {isSaving ? (
                   <>
                     <RefreshCw className="h-4 w-4 animate-spin" />
-                    Gravando no Supabase...
+                    Salvando chamada...
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="h-4 w-4" />
-                    {isExistingSession ? 'Salvar Alterações da Chamada' : 'Salvar Chamada no Banco de Dados'}
+                    {isExistingSession ? 'Salvar Alterações da Chamada' : 'Confirmar e Salvar Chamada'}
                   </>
                 )}
               </button>
@@ -1081,7 +1081,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                     <tr>
                       <td colSpan={9} className="py-12 text-center text-slate-400">
                         <RefreshCw className="h-5 w-5 animate-spin text-red-500 mx-auto mb-2" />
-                        Carregando histórico do Supabase...
+                        Carregando histórico de frequência...
                       </td>
                     </tr>
                   ) : sessionSummaries.length === 0 ? (

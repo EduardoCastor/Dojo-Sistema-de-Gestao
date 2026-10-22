@@ -68,6 +68,7 @@ import { studentService, CreateStudentPayload, UpdateStudentPayload, isValidUUID
 import { classService } from './services/classService';
 import { attendanceService } from './services/attendanceService';
 import { tatamiService } from './services/tatamiService';
+import { financialService } from './services/financialService';
 
 export default function App() {
   // App view navigation
@@ -878,6 +879,21 @@ export default function App() {
     );
   };
 
+  const handleRefreshFinancial = async () => {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(currentTenantId)) {
+      setInvoices(DataStore.getInvoices(currentTenantId));
+      return;
+    }
+    try {
+      const fresh = await financialService.fetchInvoices(currentTenantId);
+      if (fresh) {
+        setInvoices(fresh);
+      }
+    } catch (err) {
+      console.warn('Erro ao atualizar mensalidades:', err);
+    }
+  };
+
   // Handlers for Martial Arts
   const handleAddMartialArt = (art: MartialArt) => {
     const updated = [...martialArts, art];
@@ -1348,6 +1364,11 @@ export default function App() {
               invoices={invoices}
               students={students}
               persons={persons}
+              classes={classes}
+              branches={tenantBranches}
+              currentBranchId={currentBranchId}
+              currentUser={currentUser}
+              onRefreshData={handleRefreshFinancial}
               onSettleInvoice={handleSettleInvoice}
             />
           )}
