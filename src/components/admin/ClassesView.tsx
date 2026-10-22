@@ -23,7 +23,7 @@ import {
   Info,
   LayoutGrid,
 } from 'lucide-react';
-import { ClassGroup, ClassSchedule, Enrollment, MartialArt, BeltRank, Student, Person, User, Branch } from '../../types';
+import { ClassGroup, ClassSchedule, Enrollment, MartialArt, BeltRank, Student, Person, User, Branch, Tatami } from '../../types';
 import { getDaysOfWeekLabels, formatCPF } from '../../utils/formatters';
 import { classService, ScheduleConflict, ClassScheduleReportRow, GraduationReportOverall } from '../../services/classService';
 
@@ -35,6 +35,7 @@ interface ClassesViewProps {
   students?: Student[];
   persons?: Person[];
   branches?: Branch[];
+  tatamis?: Tatami[];
   instructors: User[];
   tenantId?: string;
   tenantName?: string;
@@ -62,6 +63,7 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
   students = [],
   persons = [],
   branches = [],
+  tatamis = [],
   instructors,
   tenantId = 'tenant-kodokan',
   tenantName = 'TatameHub Dojo',
@@ -1345,13 +1347,20 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
                   <label className="block text-slate-300 font-medium mb-1">Tatami / Espaço</label>
                   <input
                     type="text"
+                    list="tatami-rooms-datalist"
                     value={formTatamiRoom}
                     onChange={(e) => {
                       setFormTatamiRoom(e.target.value);
                       setTimeout(verifyFormConflicts, 50);
                     }}
+                    placeholder="Ex: Tatami Principal"
                     className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
                   />
+                  <datalist id="tatami-rooms-datalist">
+                    {(tatamis || []).map((t) => (
+                      <option key={t.id} value={t.name} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 

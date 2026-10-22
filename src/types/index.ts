@@ -256,6 +256,41 @@ export interface ClassGroup {
   updatedAt?: string;
 }
 
+export interface Tatami {
+  id: string;
+  tenantId: string;
+  branchId?: string;
+  name: string; // Ex: "Tatami Principal", "Tatami 1", "Espaço Infantil"
+  dimensions?: string; // Ex: "12x12m (144m²)"
+  maxCapacity: number; // Lotação máxima do tatami
+  colorHex?: string; // Cor de identificação visual na grade
+  description?: string;
+  active: boolean; // Se false: desativação lógica preservando histórico
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateTatamiPayload {
+  tenantId: string;
+  branchId?: string;
+  name: string;
+  dimensions?: string;
+  maxCapacity: number;
+  colorHex?: string;
+  description?: string;
+  active?: boolean;
+}
+
+export interface UpdateTatamiPayload {
+  name?: string;
+  branchId?: string;
+  dimensions?: string;
+  maxCapacity?: number;
+  colorHex?: string;
+  description?: string;
+  active?: boolean;
+}
+
 export interface Enrollment {
   id: string;
   tenantId: string;

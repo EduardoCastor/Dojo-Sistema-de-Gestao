@@ -20,6 +20,7 @@ import {
   Competition,
   CompetitionAthlete,
   AuditLog,
+  Tatami,
 } from '../types';
 
 export const INITIAL_SAAS_PLANS: SaaSPlan[] = [
@@ -1225,3 +1226,46 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
     details: 'Publicado Grande Exame de Graduação de Faixas para o dia 28/11/2026.',
   },
 ];
+
+export const INITIAL_TATAMIS: Tatami[] = [
+  {
+    id: 'tatami-principal-kodokan',
+    tenantId: 'tenant-kodokan',
+    branchId: 'branch-matriz',
+    name: 'Tatami Principal (Dojo Central)',
+    dimensions: '12x12m (144m²)',
+    maxCapacity: 30,
+    colorHex: '#dc2626',
+    description: 'Área principal de treino com tatamis olímpicos amortecidos e proteção lateral.',
+    active: true,
+    createdAt: '2025-01-01T08:00:00Z',
+    updatedAt: '2025-01-01T08:00:00Z',
+  },
+  {
+    id: 'tatami-1-kodokan',
+    tenantId: 'tenant-kodokan',
+    branchId: 'branch-matriz',
+    name: 'Tatami 1',
+    dimensions: '8x8m (64m²)',
+    maxCapacity: 18,
+    colorHex: '#2563eb',
+    description: 'Espaço secundário dedicado a turmas intermediárias e treinos específicos.',
+    active: true,
+    createdAt: '2025-01-01T08:00:00Z',
+    updatedAt: '2025-01-01T08:00:00Z',
+  },
+  {
+    id: 'tatami-2-kodokan',
+    tenantId: 'tenant-kodokan',
+    branchId: 'branch-matriz',
+    name: 'Tatami 2 (Espaço Infantil)',
+    dimensions: '6x6m (36m²)',
+    maxCapacity: 12,
+    colorHex: '#16a34a',
+    description: 'Espaço com solo reforçado de alta densidade para turmas baby e infantil.',
+    active: true,
+    createdAt: '2025-01-01T08:00:00Z',
+    updatedAt: '2025-01-01T08:00:00Z',
+  },
+];
+

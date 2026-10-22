@@ -21,6 +21,7 @@ import {
   SaaSPlanId,
   BeltRank,
   MartialArt,
+  Tatami,
 } from './types';
 
 // Layouts
@@ -66,6 +67,7 @@ import { supabase, authService, isSupabaseConfigured, UserMembership } from './s
 import { studentService, CreateStudentPayload, UpdateStudentPayload, isValidUUID } from './services/studentService';
 import { classService } from './services/classService';
 import { attendanceService } from './services/attendanceService';
+import { tatamiService } from './services/tatamiService';
 
 export default function App() {
   // App view navigation
@@ -98,6 +100,7 @@ export default function App() {
   const [healthRecords, setHealthRecords] = useState(() => DataStore.getHealthRecords(currentTenantId));
   const [martialArts, setMartialArts] = useState(() => DataStore.getMartialArts(currentTenantId));
   const [beltRanks, setBeltRanks] = useState(() => DataStore.getBeltRanks(currentTenantId));
+  const [tatamis, setTatamis] = useState<Tatami[]>(() => DataStore.getTatamis(currentTenantId));
   const [classes, setClasses] = useState<ClassGroup[]>(() => DataStore.getClasses(currentTenantId));
   const [enrollments, setEnrollments] = useState<Enrollment[]>(() => DataStore.getEnrollments(currentTenantId));
   const [attendances, setAttendances] = useState<AttendanceRecord[]>(() => DataStore.getAttendances(currentTenantId));
@@ -120,6 +123,7 @@ export default function App() {
     setHealthRecords(DataStore.getHealthRecords(currentTenantId));
     setMartialArts(DataStore.getMartialArts(currentTenantId));
     setBeltRanks(DataStore.getBeltRanks(currentTenantId));
+    setTatamis(DataStore.getTatamis(currentTenantId));
     setClasses(DataStore.getClasses(currentTenantId));
     setEnrollments(DataStore.getEnrollments(currentTenantId));
     setAttendances(DataStore.getAttendances(currentTenantId));
@@ -169,20 +173,22 @@ export default function App() {
           console.warn('Aviso ao sincronizar modalidades/faixas do Supabase:', mErr);
         }
 
-        // Sincronizar turmas, horários e frequência reais da academia ativa
+        // Sincronizar turmas, horários, frequência e tatamis reais da academia ativa
         try {
-          const [loadedClasses, loadedEnrollments, loadedAttendances] = await Promise.all([
+          const [loadedClasses, loadedEnrollments, loadedAttendances, loadedTatamis] = await Promise.all([
             classService.fetchClasses(currentTenantId),
             classService.fetchEnrollments(currentTenantId),
             attendanceService.fetchAttendances(currentTenantId),
+            tatamiService.fetchTatamis(currentTenantId),
           ]);
           if (isMounted) {
             if (loadedClasses && loadedClasses.length > 0) setClasses(loadedClasses);
             if (loadedEnrollments) setEnrollments(loadedEnrollments);
             if (loadedAttendances && loadedAttendances.length > 0) setAttendances(loadedAttendances);
+            if (loadedTatamis && loadedTatamis.length > 0) setTatamis(loadedTatamis);
           }
         } catch (cErr) {
-          console.warn('Aviso ao sincronizar turmas/matrículas/frequência do Supabase:', cErr);
+          console.warn('Aviso ao sincronizar turmas/matrículas/frequência/tatamis do Supabase:', cErr);
         }
       } catch (err) {
         console.warn('Erro ao sincronizar alunos do banco:', err);
@@ -780,6 +786,21 @@ export default function App() {
     }
   };
 
+  const handleRefreshTatamis = async () => {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(currentTenantId)) {
+      setTatamis(DataStore.getTatamis(currentTenantId));
+      return;
+    }
+    try {
+      const fresh = await tatamiService.fetchTatamis(currentTenantId);
+      if (fresh && fresh.length > 0) {
+        setTatamis(fresh);
+      }
+    } catch (err) {
+      console.warn('Erro ao atualizar tatamis:', err);
+    }
+  };
+
   const handleSaveAttendance = async (records: AttendanceRecord[]) => {
     if (selectedClassForAttendance && isSupabaseConfigured() && supabase && isValidUUID(currentTenantId)) {
       try {
@@ -1273,6 +1294,7 @@ export default function App() {
               instructors={users.filter(u => u.role === 'instructor' || u.role === 'owner')}
               tenantId={currentTenantId}
               tenantName={activeTenant.tradeName}
+              tatamis={tatamis}
               onOpenAttendance={(cls) => {
                 setSelectedClassForAttendance(cls);
                 setIsAttendanceModalOpen(true);
@@ -1309,6 +1331,9 @@ export default function App() {
               branches={tenantBranches}
               currentBranchId={currentBranchId}
               tenantName={activeTenant.tradeName}
+              tenantId={currentTenantId}
+              tatamis={tatamis}
+              onRefreshTatamis={handleRefreshTatamis}
               onOpenAttendance={(cls) => {
                 setSelectedClassForAttendance(cls);
                 setIsAttendanceModalOpen(true);

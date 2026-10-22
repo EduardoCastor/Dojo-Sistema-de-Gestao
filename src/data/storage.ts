@@ -20,6 +20,7 @@ import {
   CompetitionAthlete,
   AuditLog,
   SaaSPlan,
+  Tatami,
 } from '../types';
 
 import {
@@ -44,6 +45,7 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_MARTIAL_ARTS,
   INITIAL_BELT_RANKS,
+  INITIAL_TATAMIS,
 } from './initialData';
 
 const STORAGE_PREFIX = 'tatamehub_';
@@ -164,6 +166,16 @@ export class DataStore {
 
   static saveBeltRanks(ranks: BeltRank[]): void {
     save('belt_ranks', ranks);
+  }
+
+  static getTatamis(tenantId: string): Tatami[] {
+    const all = load('tatamis', INITIAL_TATAMIS);
+    const filtered = all.filter(t => t.tenantId === tenantId);
+    return filtered.length > 0 ? filtered : all.filter(t => t.tenantId === 'tenant-kodokan');
+  }
+
+  static saveTatamis(tatamis: Tatami[]): void {
+    save('tatamis', tatamis);
   }
 
   static getClasses(tenantId: string): ClassGroup[] {
