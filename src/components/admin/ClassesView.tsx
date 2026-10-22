@@ -705,7 +705,7 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
             className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-white hover:border-red-500/50 transition-colors cursor-pointer"
           >
             <LayoutGrid className="h-4 w-4 text-emerald-400" />
-            <span>Ocupação dos Tatamis</span>
+            <span>Gerenciador de Tatamis</span>
           </button>
         )}
       </div>

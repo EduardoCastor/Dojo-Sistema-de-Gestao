@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   LayoutGrid,
   Calendar,
@@ -21,12 +21,11 @@ import {
   Check,
   X,
   Layers,
-  Sparkles,
   HelpCircle,
 } from 'lucide-react';
 import { ClassGroup, ClassSchedule, MartialArt, User, Branch, Tatami } from '../../types';
 import { timeIntervalsOverlap } from '../../services/classService';
-import { tatamiService, TatamiAvailabilityResult } from '../../services/tatamiService';
+import { tatamiService } from '../../services/tatamiService';
 import { TatamiFormModal } from './TatamiFormModal';
 
 interface TatamiOccupancyViewProps {
@@ -75,7 +74,7 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
   onNavigateToClasses,
   onOpenAttendance,
 }) => {
-  // Aba ativa: 'occupancy' (Quadro de Ocupação & Disponibilidade) ou 'tatamis' (CRUD de Tatamis)
+  // Aba ativa: 'occupancy' (Quadro de Ocupação & Horários) ou 'tatamis' (Gerenciar Tatamis)
   const [activeMainTab, setActiveMainTab] = useState<'occupancy' | 'tatamis'>('occupancy');
 
   // Estados de Tatamis (carregados do Supabase/Service ou props)
@@ -92,13 +91,6 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
   const [selectedTatamiFilter, setSelectedTatamiFilter] = useState<string>('all');
   const [includeInactive, setIncludeInactive] = useState<boolean>(false);
 
-  // Estados do Verificador Rápido de Disponibilidade por Horário Específico
-  const [checkStartTime, setCheckStartTime] = useState<string>('18:00');
-  const [checkEndTime, setCheckEndTime] = useState<string>('19:15');
-  const [quickCheckDay, setQuickCheckDay] = useState<number>(1);
-  const [availabilityResult, setAvailabilityResult] = useState<TatamiAvailabilityResult | null>(null);
-  const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
-
   // Modais de Detalhe
   const [detailModalClass, setDetailModalClass] = useState<ClassGroup | null>(null);
   const [freeSlotDetail, setFreeSlotDetail] = useState<{
@@ -106,9 +98,6 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
     dayLabel: string;
     timeSlot: string;
   } | null>(null);
-
-  // Token anti-race-condition para requisições rápidas de disponibilidade
-  const checkReqCounter = useRef(0);
 
   // Sincronizar tatamis externos quando alterados
   useEffect(() => {
@@ -340,40 +329,12 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
     };
   }, [displayTatamis, dayAllocations, activeWindowConfig]);
 
-  // PARTE B — Recálculo em tempo real do Verificador de Disponibilidade
-  useEffect(() => {
-    const reqId = ++checkReqCounter.current;
-    setIsCheckingAvailability(true);
-
-    // Validação de intervalo válido
-    if (checkStartTime && checkEndTime && checkStartTime < checkEndTime) {
-      const res = tatamiService.checkAvailability({
-        tenantId,
-        branchId: selectedBranchId !== 'all' ? selectedBranchId : undefined,
-        dayOfWeek: quickCheckDay,
-        startTime: checkStartTime,
-        endTime: checkEndTime,
-        tatamis: allTatamisList,
-        classes: filteredClasses,
-      });
-
-      // Proteção anti-race-condition
-      if (reqId === checkReqCounter.current) {
-        setAvailabilityResult(res);
-        setIsCheckingAvailability(false);
-      }
-    } else {
-      setAvailabilityResult(null);
-      setIsCheckingAvailability(false);
-    }
-  }, [checkStartTime, checkEndTime, quickCheckDay, selectedBranchId, allTatamisList, filteredClasses, tenantId]);
-
   const currentDayLabel = useMemo(
     () => DAYS_OF_WEEK.find((d) => d.id === selectedDay)?.label || 'Segunda-feira',
     [selectedDay]
   );
 
-  // AÇÕES CRUD DE TATAMIS (PARTE A)
+  // AÇÕES DE GESTÃO DE TATAMIS
   const handleOpenCreateTatami = () => {
     setEditingTatami(null);
     setIsTatamiModalOpen(true);
@@ -482,7 +443,7 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
               <LayoutGrid className="h-5 w-5 text-red-500" />
-              Ocupação dos Tatamis & Gestão de Espaços
+              Gerenciador de Tatamis
             </h1>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-950/60 border border-red-500/30 text-red-400">
               {activeMainTab === 'occupancy' ? 'Quadro de Ocupação' : 'Cadastro de Tatamis'}
@@ -576,7 +537,7 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
           }`}
         >
           <Layers className="h-4 w-4 text-amber-400" />
-          <span>Gerenciar Tatamis (CRUD)</span>
+          <span>Gerenciar Tatamis</span>
           <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
             {localTatamis.length}
           </span>
@@ -652,7 +613,6 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
                     key={day.id}
                     onClick={() => {
                       setSelectedDay(day.id);
-                      setQuickCheckDay(day.id);
                     }}
                     className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                       isSelected
@@ -743,83 +703,6 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
                 <span className="text-amber-400 font-bold">Conflito de Horário</span>
               </div>
             </div>
-          </div>
-
-          {/* PARTE B — VERIFICADOR INTERATIVO DE DISPONIBILIDADE POR HORÁRIO ESPECÍFICO */}
-          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-950/70 space-y-3">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-emerald-400" />
-                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Verificador Instantâneo de Disponibilidade de Espaço
-                </h3>
-              </div>
-              <span className="text-[11px] text-slate-400">
-                Dia analisado: <strong className="text-white">{currentDayLabel}</strong>
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-slate-300">Início:</span>
-                <input
-                  type="time"
-                  value={checkStartTime}
-                  onChange={(e) => setCheckStartTime(e.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-white font-mono focus:border-red-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-300">Término:</span>
-                <input
-                  type="time"
-                  value={checkEndTime}
-                  onChange={(e) => setCheckEndTime(e.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-white font-mono focus:border-red-500 focus:outline-none"
-                />
-              </div>
-
-              {checkStartTime >= checkEndTime && (
-                <span className="text-[11px] text-red-400 font-semibold">
-                  O horário de início deve ser anterior ao término.
-                </span>
-              )}
-            </div>
-
-            {/* Resultado do Teste de Disponibilidade */}
-            {availabilityResult && (
-              <div className="pt-2 border-t border-slate-800/80">
-                {availabilityResult.availableCount === 0 ? (
-                  <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-950/40 text-amber-300 text-xs flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-                    <span>
-                      Nenhum tatami disponível na {currentDayLabel} entre {checkStartTime} e {checkEndTime}. Todos os {availabilityResult.totalCount} espaços estão ocupados por aulas agendadas.
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] text-slate-400 font-semibold">Tatamis Livres ({checkStartTime} às {checkEndTime}):</span>
-                    {availabilityResult.availableTatamis.map((t) => (
-                      <span
-                        key={t.id}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-950/60 border border-emerald-500/40 text-emerald-300"
-                      >
-                        <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                        <span>{t.name}</span>
-                        <span className="text-[10px] text-emerald-500 font-normal">({t.maxCapacity} vagas)</span>
-                      </span>
-                    ))}
-                    {availabilityResult.occupiedTatamis.length > 0 && (
-                      <span className="text-[11px] text-slate-500 ml-2">
-                        · {availabilityResult.occupiedTatamis.length} ocupado(s)
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* AVISO SE HOUVER CONFLITO NO PERÍODO */}
@@ -965,7 +848,7 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* ABA 2: CRUD DE TATAMIS & ESPAÇOS FÍSICOS (PARTE A)             */}
+      {/* ABA 2: GESTÃO DE TATAMIS & ESPAÇOS FÍSICOS                    */}
       {/* ============================================================== */}
       {activeMainTab === 'tatamis' && (
         <div className="space-y-4">
