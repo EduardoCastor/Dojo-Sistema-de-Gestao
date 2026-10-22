@@ -343,39 +343,88 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   // ==============================================================
   // AÇÕES FINANCEIRAS
   // ==============================================================
-  const handleOpenSettleModal = (inv: Invoice) => {
-    setSettlingInvoice(inv);
+  const handleOpenSettleInvoice = (inv: Invoice) => {
+    setSettlingTarget({ type: 'invoice', data: inv });
     setSettleAmount(inv.balance);
-    setSettleMethod(inv.paymentMethod || 'pix');
+    setSettleMethod((inv.paymentMethod as any) || 'pix');
+    setSettleDate(new Date().toISOString().split('T')[0]);
     setSettleNotes('');
+    setSettleError(null);
+  };
+
+  const handleOpenSettleTransaction = (tx: FinancialTransaction) => {
+    const currentPaid = tx.paidAmount !== undefined ? tx.paidAmount : (tx.status === 'completed' ? tx.amount : 0);
+    const currentBalance = tx.balance !== undefined ? tx.balance : (tx.status === 'completed' ? 0 : Math.max(0, tx.amount - currentPaid));
+
+    setSettlingTarget({ type: 'transaction', data: tx });
+    setSettleAmount(currentBalance);
+    setSettleMethod((tx.paymentMethod as any) || 'pix');
+    setSettleDate(new Date().toISOString().split('T')[0]);
+    setSettleNotes('');
+    setSettleError(null);
   };
 
   const handleConfirmSettle = async () => {
-    if (!settlingInvoice) return;
-    setIsSubmittingPayment(true);
-    try {
-      const updated = await financialService.settlePayment(settlingInvoice.id, tenant.id, {
-        amount: settleAmount,
-        paymentMethod: settleMethod,
-        notes: settleNotes.trim() || undefined,
-        registeredByName: currentUser.name,
-        registeredByUserId: currentUser.id,
-      });
+    if (!settlingTarget || isSubmittingPayment) return;
 
-      setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-      setFeedbackBanner({
-        type: 'success',
-        message: `Pagamento de ${formatCurrencyBRL(settleAmount)} registrado com sucesso.`,
-      });
-      setSettlingInvoice(null);
-      if (onSettleInvoice) {
-        onSettleInvoice(updated.id, updated.paymentMethod, settleAmount);
+    const currentBalance = settlingTarget.type === 'invoice'
+      ? settlingTarget.data.balance
+      : (settlingTarget.data.balance !== undefined
+          ? settlingTarget.data.balance
+          : (settlingTarget.data.status === 'completed' ? 0 : Math.max(0, settlingTarget.data.amount - (settlingTarget.data.paidAmount || 0))));
+
+    if (settleAmount <= 0) {
+      setSettleError('O valor da baixa deve ser maior que zero.');
+      return;
+    }
+
+    if (settleAmount > currentBalance) {
+      setSettleError(`O valor da baixa (${formatCurrencyBRL(settleAmount)}) não pode ser superior ao saldo pendente (${formatCurrencyBRL(currentBalance)}).`);
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    setSettleError(null);
+
+    try {
+      if (settlingTarget.type === 'invoice') {
+        const updated = await financialService.settlePayment(settlingTarget.data.id, tenant.id, {
+          amount: settleAmount,
+          paymentMethod: settleMethod,
+          paymentDate: settleDate,
+          notes: settleNotes.trim() || undefined,
+          registeredByName: currentUser.name,
+          registeredByUserId: currentUser.id,
+        });
+
+        setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+        setFeedbackBanner({
+          type: 'success',
+          message: `Baixa de ${formatCurrencyBRL(settleAmount)} na mensalidade registrada com sucesso.`,
+        });
+        if (onSettleInvoice) {
+          onSettleInvoice(updated);
+        }
+      } else {
+        const updated = await financialService.settleTransaction(settlingTarget.data.id, tenant.id, {
+          amount: settleAmount,
+          paymentMethod: settleMethod,
+          paymentDate: settleDate,
+          notes: settleNotes.trim() || undefined,
+          registeredByName: currentUser.name,
+          registeredByUserId: currentUser.id,
+        });
+
+        setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+        setFeedbackBanner({
+          type: 'success',
+          message: `Baixa de ${formatCurrencyBRL(settleAmount)} no lançamento "${updated.description}" confirmada com sucesso.`,
+        });
       }
+
+      setSettlingTarget(null);
     } catch (err: any) {
-      setFeedbackBanner({
-        type: 'error',
-        message: err?.message || 'Não foi possível registrar o pagamento.',
-      });
+      setSettleError(err?.message || 'Não foi possível registrar a baixa. Verifique sua conexão e tente novamente.');
     } finally {
       setIsSubmittingPayment(false);
     }
