@@ -182,15 +182,23 @@ CREATE POLICY reminders_write_financial ON public.payment_reminders
     )
   );
 
--- 6. TRIGGERS DE MODTIME
+-- 6. FUNÇÃO E TRIGGERS DE ATUALIZAÇÃO AUTOMÁTICA (updated_at)
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = timezone('utc'::text, now());
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 DROP TRIGGER IF EXISTS update_membership_plans_modtime ON public.membership_plans;
 CREATE TRIGGER update_membership_plans_modtime
   BEFORE UPDATE ON public.membership_plans
   FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
+  EXECUTE FUNCTION public.update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_financial_transactions_modtime ON public.financial_transactions;
 CREATE TRIGGER update_financial_transactions_modtime
   BEFORE UPDATE ON public.financial_transactions
   FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
+  EXECUTE FUNCTION public.update_updated_at_column();
