@@ -263,6 +263,24 @@ export const attendanceService = {
       throw new Error('A data da aula é obrigatória.');
     }
 
+    // Obter identificador do usuário autenticado real na sessão do Supabase
+    let authenticatedUserId: string | null = isValidUUID(currentUser.id) ? currentUser.id : null;
+    let recordedByName: string = currentUser.name;
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          authenticatedUserId = authData.user.id;
+          if (authData.user.user_metadata?.full_name) {
+            recordedByName = authData.user.user_metadata.full_name;
+          }
+        }
+      } catch (authErr) {
+        console.warn('Aviso: não foi possível obter usuário autenticado de auth.getUser():', authErr);
+      }
+    }
+
     // 1. Tentar execução via RPC atômica save_attendance_atomic
     if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
       try {
@@ -272,14 +290,14 @@ export const attendanceService = {
           p_session_date: date,
           p_start_time: startTime || null,
           p_end_time: endTime || null,
-          p_instructor_name: instructorName || currentUser.name,
+          p_instructor_name: instructorName || recordedByName,
           p_session_status: sessionStatus,
           p_session_notes: sessionNotes || null,
           p_records: records.map((r) => ({
             student_id: r.studentId,
             status: r.status,
             notes: r.notes || null,
-            recorded_by_name: currentUser.name,
+            recorded_by_name: recordedByName,
           })),
         });
 
@@ -336,8 +354,8 @@ export const attendanceService = {
               session_date: date,
               scheduled_start_time: startTime || null,
               scheduled_end_time: endTime || null,
-              instructor_user_id: isValidUUID(currentUser.id) ? currentUser.id : null,
-              instructor_name: instructorName || currentUser.name,
+              instructor_user_id: authenticatedUserId,
+              instructor_name: instructorName || recordedByName,
               status: sessionStatus,
               notes: sessionNotes || null,
               updated_at: new Date().toISOString(),
@@ -363,8 +381,8 @@ export const attendanceService = {
           date: date,
           status: r.status,
           notes: r.notes || null,
-          recorded_by_user_id: isValidUUID(currentUser.id) ? currentUser.id : null,
-          recorded_by_name: currentUser.name,
+          recorded_by_user_id: authenticatedUserId,
+          recorded_by_name: recordedByName,
           updated_at: new Date().toISOString(),
         };
         if (sessionId) {
