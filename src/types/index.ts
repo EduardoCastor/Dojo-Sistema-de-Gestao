@@ -402,16 +402,19 @@ export interface FinancialTransaction {
   category: 'competition' | 'merchandise' | 'exam' | 'event' | 'administrative' | 'facilities' | 'payroll' | 'other';
   description: string;
   amount: number;
+  paidAmount?: number;
+  balance?: number;
   competence: string; // "10/2026"
   dueDate?: string;
   paymentDate?: string;
-  status: 'pending' | 'completed' | 'canceled';
+  status: 'pending' | 'partially_paid' | 'completed' | 'canceled';
   studentId?: string;
   guardianPersonId?: string;
   classGroupId?: string;
   quantity?: number;
   unitPrice?: number;
   paymentMethod?: 'pix' | 'boleto' | 'credit_card' | 'cash' | 'transfer';
+  receiptNumber?: string;
   notes?: string;
   createdByUserId?: string;
   createdByUserName?: string;
@@ -426,6 +429,8 @@ export interface CreateTransactionPayload {
   category: FinancialTransaction['category'];
   description: string;
   amount: number;
+  paidAmount?: number;
+  balance?: number;
   competence: string;
   dueDate?: string;
   paymentDate?: string;

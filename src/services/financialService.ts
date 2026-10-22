@@ -107,7 +107,8 @@ export const financialService = {
     tenantId: string,
     payload: {
       amount: number;
-      paymentMethod: 'pix' | 'cash' | 'credit_card' | 'boleto';
+      paymentMethod: 'pix' | 'cash' | 'credit_card' | 'boleto' | 'transfer';
+      paymentDate?: string;
       receiptNumber?: string;
       notes?: string;
       registeredByName: string;
@@ -115,22 +116,66 @@ export const financialService = {
     }
   ): Promise<Invoice> {
     const currentInvoices = DataStore.getInvoices(tenantId);
-    const invoice = currentInvoices.find((i) => i.id === invoiceId);
+    let invoice = currentInvoices.find((i) => i.id === invoiceId);
+
+    if (!invoice && isSupabaseConfigured() && supabase && isValidUUID(invoiceId)) {
+      try {
+        const { data } = await supabase.from('invoices').select('*').eq('id', invoiceId).maybeSingle();
+        if (data) {
+          invoice = {
+            id: data.id,
+            tenantId: data.tenant_id,
+            branchId: data.branch_id,
+            studentId: data.student_id,
+            financialGuardianId: data.financial_guardian_person_id || undefined,
+            planId: data.plan_id || undefined,
+            classGroupId: data.class_group_id || undefined,
+            competence: data.competence,
+            issueDate: data.issue_date,
+            dueDate: data.due_date,
+            originalAmount: Number(data.original_amount),
+            discountAmount: Number(data.discount_amount || 0),
+            discountDescription: data.discount_description || undefined,
+            penaltyAndInterestAmount: Number(data.penalty_and_interest || 0),
+            finalAmount: Number(data.final_amount),
+            paidAmount: Number(data.paid_amount || 0),
+            balance: Number(data.balance),
+            status: data.status,
+            paymentDate: data.payment_date || undefined,
+            paymentMethod: data.payment_method || undefined,
+            receiptNumber: data.receipt_number || undefined,
+            pixCode: data.pix_code || undefined,
+            notes: data.notes || undefined,
+            auditTrail: [],
+          };
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar fatura no Supabase:', err);
+      }
+    }
 
     if (!invoice) {
       throw new Error('Cobrança não encontrada.');
+    }
+
+    if (invoice.balance <= 0) {
+      throw new Error('Esta mensalidade já foi integralmente quitada.');
     }
 
     if (payload.amount <= 0) {
       throw new Error('O valor de pagamento deve ser maior que zero.');
     }
 
-    const payAmount = Math.min(payload.amount, invoice.balance);
+    if (payload.amount > invoice.balance) {
+      throw new Error(`O valor da baixa (R$ ${payload.amount.toFixed(2)}) não pode ser superior ao saldo pendente (R$ ${invoice.balance.toFixed(2)}).`);
+    }
+
+    const payAmount = Math.round(payload.amount * 100) / 100;
     const newPaidAmount = Math.round((invoice.paidAmount + payAmount) * 100) / 100;
     const newBalance = Math.round(Math.max(0, invoice.balance - payAmount) * 100) / 100;
     const newStatus: Invoice['status'] = newBalance <= 0 ? 'paid' : 'partially_paid';
     const nowISO = new Date().toISOString();
-    const today = nowISO.split('T')[0];
+    const today = payload.paymentDate || nowISO.split('T')[0];
     const receipt = payload.receiptNumber || `REC-${Date.now().toString().slice(-6)}`;
 
     const updatedInvoice: Invoice = {
@@ -139,8 +184,9 @@ export const financialService = {
       balance: newBalance,
       status: newStatus,
       paymentDate: today,
-      paymentMethod: payload.paymentMethod,
+      paymentMethod: payload.paymentMethod as any,
       receiptNumber: receipt,
+      notes: payload.notes || invoice.notes,
       auditTrail: [
         ...(invoice.auditTrail || []),
         {
@@ -153,42 +199,64 @@ export const financialService = {
 
     // 1. Atualizar no Supabase se configurado
     if (isSupabaseConfigured() && supabase && isValidUUID(invoiceId) && isValidUUID(tenantId)) {
-      try {
-        await supabase
-          .from('invoices')
-          .update({
-            paid_amount: newPaidAmount,
-            balance: newBalance,
-            status: newStatus,
-            payment_date: today,
-            payment_method: payload.paymentMethod,
-            receipt_number: receipt,
-            updated_at: nowISO,
-          })
-          .eq('id', invoiceId)
-          .eq('tenant_id', tenantId);
+      const { error: updateError } = await supabase
+        .from('invoices')
+        .update({
+          paid_amount: newPaidAmount,
+          balance: newBalance,
+          status: newStatus,
+          payment_date: today,
+          payment_method: payload.paymentMethod,
+          receipt_number: receipt,
+          notes: payload.notes || invoice.notes || null,
+          updated_at: nowISO,
+        })
+        .eq('id', invoiceId)
+        .eq('tenant_id', tenantId);
 
-        // Registrar na tabela invoice_payments
-        await supabase.from('invoice_payments').insert({
+      if (updateError) {
+        console.error('Erro ao atualizar fatura no Supabase:', updateError);
+        throw new Error(`Falha ao persistir baixa no banco de dados: ${updateError.message}`);
+      }
+
+      // Registrar na tabela invoice_payments se existir
+      try {
+        let validAuthUserId: string | null = null;
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          if (authData?.user?.id) {
+            validAuthUserId = authData.user.id;
+          }
+        } catch {
+          validAuthUserId = null;
+        }
+
+        const { error: paymentError } = await supabase.from('invoice_payments').insert({
           tenant_id: tenantId,
           invoice_id: invoiceId,
           amount: payAmount,
           payment_date: today,
           payment_method: payload.paymentMethod,
           receipt_number: receipt,
-          registered_by_user_id: payload.registeredByUserId && isValidUUID(payload.registeredByUserId) ? payload.registeredByUserId : null,
+          registered_by_user_id: validAuthUserId,
           registered_by_name: payload.registeredByName,
           notes: payload.notes || null,
         });
+
+        if (paymentError) {
+          console.warn('Aviso ao registrar histórico em invoice_payments:', paymentError.message);
+        }
       } catch (err: any) {
-        console.warn('Aviso ao persistir pagamento no Supabase:', err.message);
+        console.warn('Aviso no log de invoice_payments:', err.message);
       }
     }
 
     // 2. Atualizar cache local
-    const updatedList = currentInvoices.map((i) => (i.id === invoiceId ? updatedInvoice : i));
-    DataStore.saveInvoices(updatedList);
+    const updatedList = currentInvoices.some((i) => i.id === invoiceId)
+      ? currentInvoices.map((i) => (i.id === invoiceId ? updatedInvoice : i))
+      : [updatedInvoice, ...currentInvoices];
 
+    DataStore.saveInvoices(updatedList);
     return updatedInvoice;
   },
 
@@ -620,30 +688,43 @@ export const financialService = {
         return competence && competence !== 'all' ? local.filter((t) => t.competence === competence) : local;
       }
 
-      return data.map((r: any) => ({
-        id: r.id,
-        tenantId: r.tenant_id,
-        branchId: r.branch_id || undefined,
-        type: r.type,
-        category: r.category,
-        description: r.description,
-        amount: Number(r.amount),
-        competence: r.competence,
-        dueDate: r.due_date || undefined,
-        paymentDate: r.payment_date || undefined,
-        status: r.status,
-        studentId: r.student_id || undefined,
-        guardianPersonId: r.guardian_person_id || undefined,
-        classGroupId: r.class_group_id || undefined,
-        quantity: r.quantity || 1,
-        unitPrice: r.unit_price ? Number(r.unit_price) : undefined,
-        paymentMethod: r.payment_method || undefined,
-        notes: r.notes || undefined,
-        createdByUserId: r.created_by_user_id || undefined,
-        createdByUserName: r.created_by_name || 'Administrador',
-        createdAt: r.created_at,
-        updatedAt: r.updated_at,
-      }));
+      return data.map((r: any) => {
+        const amount = Number(r.amount);
+        const paidAmount = r.paid_amount !== undefined && r.paid_amount !== null
+          ? Number(r.paid_amount)
+          : (r.status === 'completed' ? amount : 0);
+        const balance = r.balance !== undefined && r.balance !== null
+          ? Number(r.balance)
+          : (r.status === 'completed' ? 0 : Math.max(0, amount - paidAmount));
+
+        return {
+          id: r.id,
+          tenantId: r.tenant_id,
+          branchId: r.branch_id || undefined,
+          type: r.type,
+          category: r.category,
+          description: r.description,
+          amount,
+          paidAmount,
+          balance,
+          competence: r.competence,
+          dueDate: r.due_date || undefined,
+          paymentDate: r.payment_date || undefined,
+          status: r.status,
+          studentId: r.student_id || undefined,
+          guardianPersonId: r.guardian_person_id || undefined,
+          classGroupId: r.class_group_id || undefined,
+          quantity: r.quantity || 1,
+          unitPrice: r.unit_price ? Number(r.unit_price) : undefined,
+          paymentMethod: r.payment_method || undefined,
+          receiptNumber: r.receipt_number || undefined,
+          notes: r.notes || undefined,
+          createdByUserId: r.created_by_user_id || undefined,
+          createdByUserName: r.created_by_name || 'Administrador',
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        };
+      });
     } catch (err) {
       console.warn('Erro ao consultar transações extras:', err);
       return DataStore.getFinancialTransactions(tenantId);
@@ -663,6 +744,9 @@ export const financialService = {
 
     let txId = `tx-${Date.now()}`;
     const nowISO = new Date().toISOString();
+    const isPending = payload.status === 'pending';
+    const paidAmount = isPending ? 0 : payload.amount;
+    const balance = isPending ? payload.amount : 0;
 
     if (isSupabaseConfigured() && supabase && isValidUUID(payload.tenantId)) {
       try {
@@ -675,9 +759,11 @@ export const financialService = {
             category: payload.category,
             description: payload.description.trim(),
             amount: payload.amount,
+            paid_amount: paidAmount,
+            balance: balance,
             competence: payload.competence,
             due_date: payload.dueDate || null,
-            payment_date: payload.paymentDate || null,
+            payment_date: payload.paymentDate || (isPending ? null : nowISO.split('T')[0]),
             status: payload.status || 'completed',
             student_id: payload.studentId && isValidUUID(payload.studentId) ? payload.studentId : null,
             guardian_person_id: payload.guardianPersonId && isValidUUID(payload.guardianPersonId) ? payload.guardianPersonId : null,
@@ -710,9 +796,11 @@ export const financialService = {
       category: payload.category,
       description: payload.description.trim(),
       amount: payload.amount,
+      paidAmount,
+      balance,
       competence: payload.competence,
       dueDate: payload.dueDate,
-      paymentDate: payload.paymentDate,
+      paymentDate: payload.paymentDate || (isPending ? undefined : nowISO.split('T')[0]),
       status: payload.status || 'completed',
       studentId: payload.studentId,
       guardianPersonId: payload.guardianPersonId,
@@ -720,6 +808,7 @@ export const financialService = {
       quantity: payload.quantity || 1,
       unitPrice: payload.unitPrice || payload.amount,
       paymentMethod: payload.paymentMethod || 'pix',
+      receiptNumber: isPending ? undefined : `REC-TX-${Date.now().toString().slice(-6)}`,
       notes: payload.notes?.trim(),
       createdByUserId: payload.createdByUserId,
       createdByUserName: payload.createdByUserName || 'Administrador',
@@ -730,6 +819,138 @@ export const financialService = {
     const currentTxs = DataStore.getFinancialTransactions(payload.tenantId);
     DataStore.saveFinancialTransactions([newTx, ...currentTxs]);
     return newTx;
+  },
+
+  /**
+   * Registra pagamento ou baixa (integral ou parcial) em transações extras
+   */
+  async settleTransaction(
+    transactionId: string,
+    tenantId: string,
+    payload: {
+      amount: number;
+      paymentMethod: 'pix' | 'cash' | 'credit_card' | 'boleto' | 'transfer';
+      paymentDate?: string;
+      receiptNumber?: string;
+      notes?: string;
+      registeredByName: string;
+      registeredByUserId?: string;
+    }
+  ): Promise<FinancialTransaction> {
+    const currentTxs = DataStore.getFinancialTransactions(tenantId);
+    let tx = currentTxs.find((t) => t.id === transactionId);
+
+    if (!tx && isSupabaseConfigured() && supabase && isValidUUID(transactionId)) {
+      try {
+        const { data } = await supabase.from('financial_transactions').select('*').eq('id', transactionId).maybeSingle();
+        if (data) {
+          const amt = Number(data.amount);
+          const pAmt = data.paid_amount ? Number(data.paid_amount) : (data.status === 'completed' ? amt : 0);
+          const bal = data.balance !== null && data.balance !== undefined ? Number(data.balance) : (data.status === 'completed' ? 0 : amt - pAmt);
+          tx = {
+            id: data.id,
+            tenantId: data.tenant_id,
+            branchId: data.branch_id || undefined,
+            type: data.type,
+            category: data.category,
+            description: data.description,
+            amount: amt,
+            paidAmount: pAmt,
+            balance: bal,
+            competence: data.competence,
+            dueDate: data.due_date || undefined,
+            paymentDate: data.payment_date || undefined,
+            status: data.status,
+            studentId: data.student_id || undefined,
+            guardianPersonId: data.guardian_person_id || undefined,
+            classGroupId: data.class_group_id || undefined,
+            quantity: data.quantity || 1,
+            unitPrice: data.unit_price ? Number(data.unit_price) : undefined,
+            paymentMethod: data.payment_method || undefined,
+            receiptNumber: data.receipt_number || undefined,
+            notes: data.notes || undefined,
+            createdByUserId: data.created_by_user_id || undefined,
+            createdByUserName: data.created_by_name || 'Administrador',
+            createdAt: data.created_at,
+            updatedAt: data.updated_at,
+          };
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar transação no Supabase:', err);
+      }
+    }
+
+    if (!tx) {
+      throw new Error('Lançamento não encontrado.');
+    }
+
+    const currentPaid = tx.paidAmount ?? (tx.status === 'completed' ? tx.amount : 0);
+    const currentBalance = tx.balance ?? (tx.status === 'completed' ? 0 : Math.max(0, tx.amount - currentPaid));
+
+    if (currentBalance <= 0) {
+      throw new Error('Este lançamento já foi integralmente quitado.');
+    }
+
+    if (payload.amount <= 0) {
+      throw new Error('O valor da baixa deve ser maior que zero.');
+    }
+
+    if (payload.amount > currentBalance) {
+      throw new Error(`O valor da baixa (R$ ${payload.amount.toFixed(2)}) não pode ser superior ao saldo pendente (R$ ${currentBalance.toFixed(2)}).`);
+    }
+
+    const payAmount = Math.round(payload.amount * 100) / 100;
+    const newPaidAmount = Math.round((currentPaid + payAmount) * 100) / 100;
+    const newBalance = Math.round(Math.max(0, currentBalance - payAmount) * 100) / 100;
+    const newStatus: FinancialTransaction['status'] = newBalance <= 0 ? 'completed' : 'partially_paid';
+    const nowISO = new Date().toISOString();
+    const today = payload.paymentDate || nowISO.split('T')[0];
+    const receipt = payload.receiptNumber || `REC-TX-${Date.now().toString().slice(-6)}`;
+
+    const combinedNotes = payload.notes?.trim()
+      ? (tx.notes ? `${tx.notes} | Baixa: ${payload.notes.trim()}` : payload.notes.trim())
+      : tx.notes;
+
+    const updatedTx: FinancialTransaction = {
+      ...tx,
+      paidAmount: newPaidAmount,
+      balance: newBalance,
+      status: newStatus,
+      paymentDate: today,
+      paymentMethod: payload.paymentMethod,
+      receiptNumber: receipt,
+      notes: combinedNotes,
+      updatedAt: nowISO,
+    };
+
+    if (isSupabaseConfigured() && supabase && isValidUUID(transactionId) && isValidUUID(tenantId)) {
+      const { error: updateError } = await supabase
+        .from('financial_transactions')
+        .update({
+          paid_amount: newPaidAmount,
+          balance: newBalance,
+          status: newStatus,
+          payment_date: today,
+          payment_method: payload.paymentMethod,
+          receipt_number: receipt,
+          notes: combinedNotes || null,
+          updated_at: nowISO,
+        })
+        .eq('id', transactionId)
+        .eq('tenant_id', tenantId);
+
+      if (updateError) {
+        console.error('Erro ao atualizar lançamento no Supabase:', updateError);
+        throw new Error(`Falha ao registrar baixa no banco de dados: ${updateError.message}`);
+      }
+    }
+
+    const updatedList = currentTxs.some((t) => t.id === transactionId)
+      ? currentTxs.map((t) => (t.id === transactionId ? updatedTx : t))
+      : [updatedTx, ...currentTxs];
+
+    DataStore.saveFinancialTransactions(updatedList);
+    return updatedTx;
   },
 
   /**

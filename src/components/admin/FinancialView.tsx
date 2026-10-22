@@ -53,6 +53,10 @@ import { PlanFormModal } from './PlanFormModal';
 import { TransactionFormModal } from './TransactionFormModal';
 import { GenerateInvoicesModal } from './GenerateInvoicesModal';
 
+export type SettleTarget =
+  | { type: 'invoice'; data: Invoice }
+  | { type: 'transaction'; data: FinancialTransaction };
+
 interface FinancialViewProps {
   tenant: Tenant;
   invoices?: Invoice[];
@@ -63,7 +67,7 @@ interface FinancialViewProps {
   currentBranchId?: string;
   currentUser: User;
   onRefreshData?: () => Promise<void>;
-  onSettleInvoice?: (invoiceId: string, method: Invoice['paymentMethod'], amount: number) => void;
+  onSettleInvoice?: (updatedInvoice: Invoice) => void;
 }
 
 export const FinancialView: React.FC<FinancialViewProps> = ({
@@ -89,6 +93,13 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [feedbackBanner, setFeedbackBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Sincronizar propInvoices caso venha atualizado do App.tsx
+  useEffect(() => {
+    if (propInvoices && propInvoices.length > 0) {
+      setInvoices(propInvoices);
+    }
+  }, [propInvoices]);
+
   // Filtros Globais do Painel
   const [selectedCompetence, setSelectedCompetence] = useState<string>('10/2026');
   const [selectedBranchId, setSelectedBranchId] = useState<string>(currentBranchId || 'all');
@@ -112,11 +123,13 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   const [selectedInvoiceForReceipt, setSelectedInvoiceForReceipt] = useState<Invoice | null>(null);
   const [copiedPix, setCopiedPix] = useState(false);
 
-  // Modal de Pagamento / Baixa
-  const [settlingInvoice, setSettlingInvoice] = useState<Invoice | null>(null);
+  // Modal de Baixa / Registro de Pagamento (Mensalidades e Transações Extras)
+  const [settlingTarget, setSettlingTarget] = useState<SettleTarget | null>(null);
   const [settleAmount, setSettleAmount] = useState<number>(0);
-  const [settleMethod, setSettleMethod] = useState<'pix' | 'cash' | 'credit_card' | 'boleto'>('pix');
+  const [settleMethod, setSettleMethod] = useState<'pix' | 'cash' | 'credit_card' | 'boleto' | 'transfer'>('pix');
+  const [settleDate, setSettleDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [settleNotes, setSettleNotes] = useState('');
+  const [settleError, setSettleError] = useState<string | null>(null);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
   // Carregar dados completos
@@ -210,23 +223,27 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     );
     const overdueStudentsCount = overdueStudentIds.size;
 
-    // Receitas Extras
+    // Receitas Extras (considerando valores pagos e saldos pendentes)
     const extraIncomes = periodTransactions.filter((t) => t.type === 'income');
-    const extraIncomeRealized = extraIncomes
-      .filter((t) => t.status === 'completed')
-      .reduce((acc, t) => acc + t.amount, 0);
-    const extraIncomePending = extraIncomes
-      .filter((t) => t.status === 'pending')
-      .reduce((acc, t) => acc + t.amount, 0);
+    const extraIncomeRealized = extraIncomes.reduce((acc, t) => {
+      const paid = t.paidAmount !== undefined ? t.paidAmount : (t.status === 'completed' ? t.amount : 0);
+      return acc + paid;
+    }, 0);
+    const extraIncomePending = extraIncomes.reduce((acc, t) => {
+      const bal = t.balance !== undefined ? t.balance : (t.status === 'completed' ? 0 : t.amount);
+      return acc + bal;
+    }, 0);
 
-    // Despesas Registradas
+    // Despesas Registradas (considerando valores pagos e saldos pendentes)
     const expenses = periodTransactions.filter((t) => t.type === 'expense');
-    const expensesRealized = expenses
-      .filter((t) => t.status === 'completed')
-      .reduce((acc, t) => acc + t.amount, 0);
-    const expensesPending = expenses
-      .filter((t) => t.status === 'pending')
-      .reduce((acc, t) => acc + t.amount, 0);
+    const expensesRealized = expenses.reduce((acc, t) => {
+      const paid = t.paidAmount !== undefined ? t.paidAmount : (t.status === 'completed' ? t.amount : 0);
+      return acc + paid;
+    }, 0);
+    const expensesPending = expenses.reduce((acc, t) => {
+      const bal = t.balance !== undefined ? t.balance : (t.status === 'completed' ? 0 : t.amount);
+      return acc + bal;
+    }, 0);
 
     // Saldo do Período: Receitas Efetivamente Realizadas - Despesas Efetivamente Pagas
     const totalRealizedRevenue = totalPaid + extraIncomeRealized;

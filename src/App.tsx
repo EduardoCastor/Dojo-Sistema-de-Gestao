@@ -841,32 +841,14 @@ export default function App() {
   };
 
   // Handlers for Invoice settlement
-  const handleSettleInvoice = (invoiceId: string, method: Invoice['paymentMethod'], amount: number) => {
-    const updatedInvoices = invoices.map((inv) => {
-      if (inv.id === invoiceId) {
-        return {
-          ...inv,
-          status: 'paid' as const,
-          paidAmount: amount,
-          balance: 0,
-          paymentDate: new Date().toISOString().split('T')[0],
-          paymentMethod: method,
-          receiptNumber: `REC-${Date.now().toString().slice(-6)}`,
-          auditTrail: [
-            ...inv.auditTrail,
-            {
-              date: new Date().toISOString(),
-              action: `Baixa manual confirmada via ${method?.toUpperCase()}`,
-              userName: currentUser.name,
-            },
-          ],
-        };
-      }
-      return inv;
+  const handleSettleInvoice = (updatedInvoice: Invoice) => {
+    setInvoices((prev) => {
+      const next = prev.some((inv) => inv.id === updatedInvoice.id)
+        ? prev.map((inv) => (inv.id === updatedInvoice.id ? updatedInvoice : inv))
+        : [updatedInvoice, ...prev];
+      DataStore.saveInvoices(next);
+      return next;
     });
-
-    DataStore.saveInvoices(updatedInvoices);
-    setInvoices(updatedInvoices);
 
     DataStore.logAudit(
       currentTenantId,
@@ -874,8 +856,8 @@ export default function App() {
       currentUser.name,
       'Baixa Financeira',
       'Invoice',
-      invoiceId,
-      `Liquidação registrada no valor de ${amount} BRL.`
+      updatedInvoice.id,
+      `Baixa registrada no valor recebido de ${updatedInvoice.paidAmount} BRL (Saldo restante: ${updatedInvoice.balance} BRL).`
     );
   };
 
