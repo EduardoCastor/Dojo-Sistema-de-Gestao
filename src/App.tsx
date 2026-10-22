@@ -79,6 +79,7 @@ export default function App() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [isUpgradePlanOpen, setIsUpgradePlanOpen] = useState(false);
   const [selectedClassForAttendance, setSelectedClassForAttendance] = useState<ClassGroup | null>(null);
+  const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
 
   // Active Session context
   const [currentTenantId, setCurrentTenantId] = useState<string>('tenant-kodokan');
@@ -1274,7 +1275,7 @@ export default function App() {
               tenantName={activeTenant.tradeName}
               onOpenAttendance={(cls) => {
                 setSelectedClassForAttendance(cls);
-                setAdminTab('attendance');
+                setIsAttendanceModalOpen(true);
               }}
               onAddClass={handleAddClass}
               onRefreshData={handleRefreshClasses}
@@ -1310,7 +1311,7 @@ export default function App() {
               tenantName={activeTenant.tradeName}
               onOpenAttendance={(cls) => {
                 setSelectedClassForAttendance(cls);
-                setAdminTab('attendance');
+                setIsAttendanceModalOpen(true);
               }}
               onNavigateToClasses={() => setAdminTab('classes')}
             />
@@ -1534,16 +1535,23 @@ export default function App() {
         onUpdate={handleUpdateStudent}
       />
 
-      {selectedClassForAttendance && (
+      {isAttendanceModalOpen && selectedClassForAttendance && (
         <AttendanceModal
-          isOpen={true}
-          onClose={() => setSelectedClassForAttendance(null)}
+          isOpen={isAttendanceModalOpen}
+          onClose={() => {
+            setIsAttendanceModalOpen(false);
+          }}
           classGroup={selectedClassForAttendance}
           students={students}
           persons={persons}
           enrollments={enrollments}
           currentUser={currentUser}
-          onSaveAttendance={handleSaveAttendance}
+          tenantId={currentTenantId}
+          onSaved={handleRefreshAttendance}
+          onNavigateToFullControl={() => {
+            setIsAttendanceModalOpen(false);
+            setAdminTab('attendance');
+          }}
         />
       )}
 

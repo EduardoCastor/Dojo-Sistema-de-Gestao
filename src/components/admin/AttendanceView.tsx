@@ -80,6 +80,13 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     new Date().toISOString().split('T')[0]
   );
 
+  // Sincronizar turma inicial quando o componente recebe uma turma externa
+  useEffect(() => {
+    if (initialClassGroup?.id) {
+      setSelectedClassId(initialClassGroup.id);
+    }
+  }, [initialClassGroup?.id]);
+
   const selectedClass = useMemo(
     () => classes.find((c) => c.id === selectedClassId) || activeClasses[0] || null,
     [classes, activeClasses, selectedClassId]
