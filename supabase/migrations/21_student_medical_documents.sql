@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS public.student_medical_documents (
   original_file_name text NOT NULL,
   mime_type text NOT NULL,
   file_size bigint NOT NULL,
-  created_by_user_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  created_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   created_by_user_name text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
