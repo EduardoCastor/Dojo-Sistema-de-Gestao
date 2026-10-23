@@ -610,6 +610,7 @@ export default function App() {
       branchId: currentBranchId,
       studentId: newStudent.id,
       financialGuardianId: guardianPerson?.id,
+      planId: newStudent.planId,
       competence: '10/2026',
       issueDate: new Date().toISOString().split('T')[0],
       dueDate: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(activeTenant.settings.defaultDueDay).padStart(2, '0')}`,
@@ -711,6 +712,25 @@ export default function App() {
         // Cache local
         DataStore.saveStudents(students.map((s) => (s.id === result.student.id ? result.student : s)));
 
+        // Se houve alteração de plano, sincronizar faturas futuras e proteger histórico
+        if (payloadDetails.planId !== undefined && (!editingStudent || payloadDetails.planId !== editingStudent.planId)) {
+          try {
+            const planRes = await financialService.updateStudentPlanAndFutureInvoices({
+              studentId: result.student.id,
+              newPlanId: payloadDetails.planId || undefined,
+              tenantId: activeTenantId,
+              effectiveCompetence: payloadDetails.effectiveCompetence,
+              newMonthlyFee: payloadDetails.monthlyFee,
+              currentUserName: currentUser.name,
+            });
+            if (planRes?.updatedInvoices) {
+              setInvoices(planRes.updatedInvoices);
+            }
+          } catch (planErr) {
+            console.error('Falha ao atualizar mensalidades futuras no Supabase:', planErr);
+          }
+        }
+
         await handleRefreshStudents();
         setIsNewStudentOpen(false);
         setEditingStudent(null);
@@ -744,6 +764,25 @@ export default function App() {
     setStudents(updatedStudentsList);
     setPersons(updatedPersonsList);
     setGuardians(updatedGuardiansList);
+
+    // Se houve alteração de plano no modo local, sincronizar faturas futuras e proteger histórico
+    if (payloadDetails?.planId !== undefined && (!editingStudent || payloadDetails.planId !== editingStudent.planId)) {
+      try {
+        const planRes = await financialService.updateStudentPlanAndFutureInvoices({
+          studentId: updatedStudent.id,
+          newPlanId: payloadDetails.planId || undefined,
+          tenantId: currentTenantId,
+          effectiveCompetence: payloadDetails.effectiveCompetence,
+          newMonthlyFee: payloadDetails.monthlyFee,
+          currentUserName: currentUser.name,
+        });
+        if (planRes?.updatedInvoices) {
+          setInvoices(planRes.updatedInvoices);
+        }
+      } catch (planErr) {
+        console.error('Falha ao atualizar mensalidades futuras locais:', planErr);
+      }
+    }
 
     DataStore.logAudit(
       currentTenantId,
@@ -1571,6 +1610,13 @@ export default function App() {
         }
         allGuardians={guardians}
         allPersons={persons}
+        invoices={invoices}
+        onNavigateToFinancialPlans={() => {
+          setIsNewStudentOpen(false);
+          setEditingStudent(null);
+          setCurrentView('admin');
+          setAdminTab('financial');
+        }}
         onSave={handleSaveStudent}
         onUpdate={handleUpdateStudent}
       />

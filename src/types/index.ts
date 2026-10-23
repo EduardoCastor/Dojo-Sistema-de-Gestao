@@ -215,6 +215,7 @@ export interface Student {
     graduatedAt: string;
   }[];
   monthlyFee: number;
+  planId?: string;
   notes?: string;
 }
 

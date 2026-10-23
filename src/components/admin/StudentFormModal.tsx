@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   UserPlus,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Trash2,
   Plus,
+  CreditCard,
 } from 'lucide-react';
 import {
   Student,
@@ -24,8 +25,10 @@ import {
   GuardianRelationship,
   BeltRank,
   MartialArt,
+  MembershipPlan,
+  Invoice,
 } from '../../types';
-import { calculateAge } from '../../utils/formatters';
+import { calculateAge, formatCurrencyBRL } from '../../utils/formatters';
 import {
   cleanCPF,
   validateCPF,
@@ -39,6 +42,12 @@ import {
   UpdateStudentPayload,
   GuardianSummaryItem,
 } from '../../services/studentService';
+import {
+  financialService,
+  getCurrentCompetence,
+  getNextCompetence,
+  parseCompetenceToInt,
+} from '../../services/financialService';
 import { supabase, isSupabaseConfigured } from '../../services/supabase';
 
 interface StudentFormModalProps {
@@ -54,6 +63,8 @@ interface StudentFormModalProps {
   guardianPersonToEdit?: Person | null;
   allGuardians?: GuardianRelationship[];
   allPersons?: Person[];
+  invoices?: Invoice[];
+  onNavigateToFinancialPlans?: () => void;
   onSave: (
     newStudent: Student,
     newPerson: Person,
@@ -83,6 +94,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   guardianPersonToEdit,
   allGuardians = [],
   allPersons = [],
+  invoices = [],
+  onNavigateToFinancialPlans,
   onSave,
   onUpdate,
 }) => {
@@ -133,6 +146,13 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   const [city, setCity] = useState('São Paulo');
   const [monthlyFee, setMonthlyFee] = useState('220');
   const [studentStatus, setStudentStatus] = useState<'active' | 'inactive' | 'suspended' | 'dropped'>('active');
+
+  // Planos de Mensalidade
+  const [availablePlans, setAvailablePlans] = useState<MembershipPlan[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [initialPlanId, setInitialPlanId] = useState<string>('');
+  const [effectiveCompetence, setEffectiveCompetence] = useState<string>(getNextCompetence());
 
   // Validação em tempo real do CPF do Aluno
   const [studentCpfStatus, setStudentCpfStatus] = useState<{
@@ -337,6 +357,34 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     };
   }, [isOpen, tenantId, guardianPersonToEdit, guardianRelToEdit, studentToEdit, allGuardians, allPersons]);
 
+  // 1.1. Carregar Planos de Mensalidade Ativos da Academia / Filial
+  useEffect(() => {
+    let isMounted = true;
+    if (!isOpen) return;
+
+    async function loadPlans() {
+      setIsLoadingPlans(true);
+      try {
+        const plans = await financialService.fetchPlans(tenantId, branchId);
+        if (isMounted) {
+          setAvailablePlans(plans.filter((p) => p.active));
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar planos de mensalidade:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingPlans(false);
+        }
+      }
+    }
+
+    loadPlans();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, tenantId, branchId]);
+
   // 2. Carregar Modalidades Reais do Supabase vinculadas à academia ativa (tenant_id)
   useEffect(() => {
     let isMounted = true;
@@ -505,6 +553,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setCity(p.address?.city || 'São Paulo');
       setMonthlyFee(String(studentToEdit.monthlyFee ?? 220));
       setStudentStatus(studentToEdit.status || 'active');
+      const curPlan = studentToEdit.planId || '';
+      setSelectedPlanId(curPlan);
+      setInitialPlanId(curPlan);
+      setEffectiveCompetence(getNextCompetence());
 
       const studentRels = (allGuardians || []).filter((g) => g.studentId === studentToEdit.id);
       const studentHasGuardian = Boolean(guardianPersonToEdit || studentRels.length > 0 || studentExistingLinks.length > 0);
@@ -541,6 +593,9 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setCity('São Paulo');
       setMonthlyFee('220');
       setStudentStatus('active');
+      setSelectedPlanId('');
+      setInitialPlanId('');
+      setEffectiveCompetence(getNextCompetence());
       setHasGuardian(true);
       setGuardianName('');
       setGuardianCpf('');
@@ -551,6 +606,41 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setGuardianMode('select_existing');
     }
   }, [isOpen, studentToEdit, personToEdit, guardianRelToEdit, guardianPersonToEdit, allGuardians, allPersons]);
+
+  const handlePlanChange = (planIdValue: string) => {
+    setSelectedPlanId(planIdValue);
+    if (!planIdValue) return;
+    const plan = availablePlans.find((p) => p.id === planIdValue);
+    if (plan) {
+      const disc = plan.discountPercentage ? (plan.amount * (plan.discountPercentage / 100)) : 0;
+      const finalPrice = Math.round(Math.max(0, plan.amount - disc) * 100) / 100;
+      setMonthlyFee(String(finalPrice));
+    }
+  };
+
+  const isPlanChanged = isEditing && selectedPlanId !== initialPlanId;
+  const initialPlan = useMemo(() => {
+    return availablePlans.find((p) => p.id === initialPlanId);
+  }, [availablePlans, initialPlanId]);
+  const newSelectedPlan = useMemo(() => {
+    return availablePlans.find((p) => p.id === selectedPlanId);
+  }, [availablePlans, selectedPlanId]);
+
+  const candidateInvoicesToUpdate = useMemo(() => {
+    if (!isPlanChanged || !studentToEdit || !invoices || invoices.length === 0) return [];
+    const today = new Date().toISOString().split('T')[0];
+    const targetCompInt = parseCompetenceToInt(effectiveCompetence);
+
+    return invoices.filter((inv) => {
+      const isTargetStudent = inv.studentId === studentToEdit.id;
+      const isPending = inv.status === 'pending';
+      const isZeroPaid = (inv.paidAmount || 0) === 0;
+      const isFullBalance = inv.balance === inv.finalAmount;
+      const isNotOverdue = !inv.dueDate || inv.dueDate >= today;
+      const isFutureComp = targetCompInt === 0 || parseCompetenceToInt(inv.competence) >= targetCompInt;
+      return isTargetStudent && isPending && isZeroPaid && isFullBalance && isNotOverdue && isFutureComp;
+    });
+  }, [isPlanChanged, studentToEdit, invoices, effectiveCompetence]);
 
   if (!isOpen) return null;
 
@@ -942,6 +1032,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       const updatedStudent: Student = {
         ...studentToEdit,
         monthlyFee: Number(monthlyFee) || studentToEdit.monthlyFee,
+        planId: selectedPlanId || undefined,
         status: studentStatus,
         currentGraduations: [
           {
@@ -1098,6 +1189,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         email,
         city,
         monthlyFee: Number(monthlyFee) || studentToEdit.monthlyFee,
+        planId: selectedPlanId || undefined,
+        effectiveCompetence: isPlanChanged ? effectiveCompetence : undefined,
         status: studentStatus,
         martialArtId: selectedArtId,
         beltRankId: selectedBeltId,
@@ -1177,6 +1270,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         },
       ],
       monthlyFee: Number(monthlyFee) || 220,
+      planId: selectedPlanId || undefined,
     };
 
     let guardianPerson: Person | undefined = undefined;
@@ -1224,6 +1318,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       email,
       city,
       monthlyFee: Number(monthlyFee) || 220,
+      planId: selectedPlanId || undefined,
       martialArtId: selectedArtId,
       beltRankId: selectedBeltId,
       selectedArt: chosenArt,
@@ -1490,7 +1585,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            {/* Linha 1: Arte Marcial & Graduação */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-slate-300 font-medium mb-1">
                   Arte Marcial * {isLoadingArts && <Loader2 className="inline h-3 w-3 animate-spin text-red-400 ml-1" />}
@@ -1546,14 +1642,42 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                   )}
                 </select>
               </div>
+            </div>
+
+            {/* Linha 2: Plano de Mensalidade, Valor e Situação */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-300 font-medium flex items-center gap-1">
+                    <CreditCard className="h-3 w-3 text-red-400" />
+                    <span>Plano de Mensalidade</span>
+                    {isLoadingPlans && <Loader2 className="inline h-2.5 w-2.5 animate-spin text-red-400 ml-1" />}
+                  </label>
+                </div>
+                <select
+                  value={selectedPlanId}
+                  onChange={(e) => handlePlanChange(e.target.value)}
+                  disabled={isLoadingPlans}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none disabled:opacity-50"
+                >
+                  <option value="">Sem plano vinculado (Personalizado)</option>
+                  {availablePlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.name} — {formatCurrencyBRL(plan.amount)}/mês{plan.discountPercentage ? ` (${plan.discountPercentage}% desc.)` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Mensalidade (R$)</label>
+                <label className="block text-slate-300 font-medium mb-1">Mensalidade Efetiva (R$)</label>
                 <input
                   type="number"
+                  step="0.01"
+                  min="0"
                   value={monthlyFee}
                   onChange={(e) => setMonthlyFee(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono focus:border-red-500 focus:outline-none"
                 />
               </div>
 
@@ -1571,6 +1695,83 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {/* Aviso se não há planos ativos cadastrados */}
+            {!isLoadingPlans && availablePlans.length === 0 && (
+              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                <span>Nenhum plano financeiro ativo cadastrado para esta filial/academia.</span>
+                {onNavigateToFinancialPlans && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onNavigateToFinancialPlans();
+                    }}
+                    className="text-red-400 hover:text-red-300 underline font-medium cursor-pointer"
+                  >
+                    Cadastrar planos em Finanças
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Banner de Alteração de Plano e Atualização de Mensalidades Futuras */}
+            {isPlanChanged && (
+              <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/50 space-y-2.5 text-amber-200">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+                  <span className="font-bold text-xs text-white">
+                    Alteração de Plano Financeiro Detectada
+                  </span>
+                </div>
+
+                <div className="text-[11px] text-amber-300/90 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-slate-400">Plano anterior:</span>
+                    <span className="font-semibold text-slate-300">{initialPlan?.name || 'Sem plano vinculado'}</span>
+                    <span className="text-slate-500">→</span>
+                    <span className="text-slate-400">Novo plano:</span>
+                    <span className="font-bold text-emerald-400">{newSelectedPlan?.name || 'Sem plano (Personalizado)'}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white mb-1">
+                      Início da Vigência (Competência)
+                    </label>
+                    <select
+                      value={effectiveCompetence}
+                      onChange={(e) => setEffectiveCompetence(e.target.value)}
+                      className="w-full rounded-lg border border-amber-500/50 bg-slate-900 px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                    >
+                      <option value={getNextCompetence()}>
+                        Próxima competência ({getNextCompetence()}) — Padrão recomendado
+                      </option>
+                      <option value={getCurrentCompetence()}>
+                        Competência atual ({getCurrentCompetence()})
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="text-[11px] flex flex-col justify-center">
+                    <span className="font-semibold text-white">
+                      {candidateInvoicesToUpdate.length} fatura(s) futura(s) em aberto serão ajustadas
+                    </span>
+                    <span className="text-amber-300/80 text-[10px]">
+                      Apenas mensalidades pendentes e não pagas a partir de {effectiveCompetence}.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-400 border-t border-amber-500/20 pt-2 flex items-center gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                  <span>
+                    <strong>Proteção do histórico financeiro:</strong> Mensalidades já pagas, baixas parciais e faturas vencidas não serão alteradas.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Seção 3: Responsável Legal & Financeiro (Reutilização de Pessoas e Vínculos Familiares) */}

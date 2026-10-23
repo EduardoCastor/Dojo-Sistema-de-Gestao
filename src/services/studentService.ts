@@ -25,6 +25,7 @@ export interface CreateStudentPayload {
   email?: string;
   city?: string;
   monthlyFee: number;
+  planId?: string;
   martialArtId: string;
   beltRankId: string;
   selectedBelt?: BeltRank;
@@ -55,6 +56,8 @@ export interface UpdateStudentPayload {
   email?: string;
   city?: string;
   monthlyFee: number;
+  planId?: string;
+  effectiveCompetence?: string;
   status: 'active' | 'inactive' | 'suspended' | 'dropped';
   martialArtId: string;
   beltRankId: string;
@@ -1590,6 +1593,7 @@ export const studentService = {
           status: row.status,
           currentGraduations: studentGrads,
           monthlyFee: Number(row.monthly_fee) || 0,
+          planId: row.plan_id || undefined,
           notes: row.notes || undefined,
         };
       });
@@ -1694,6 +1698,7 @@ export const studentService = {
       enrollment_date: new Date().toISOString().split('T')[0],
       status: 'active',
       monthly_fee: payload.monthlyFee,
+      plan_id: payload.planId && isValidUUID(payload.planId) ? payload.planId : null,
       notes: null,
     };
 
@@ -1810,6 +1815,7 @@ export const studentService = {
             },
           ],
           monthlyFee: payload.monthlyFee,
+          planId: payload.planId,
         };
 
         let createdGuardianPerson: Person | undefined = undefined;
@@ -1888,6 +1894,7 @@ export const studentService = {
         enrollment_date: studentPayload.enrollment_date,
         status: 'active',
         monthly_fee: payload.monthlyFee,
+        plan_id: payload.planId && isValidUUID(payload.planId) ? payload.planId : null,
       })
       .select()
       .single();
@@ -2072,6 +2079,7 @@ export const studentService = {
         },
       ],
       monthlyFee: payload.monthlyFee,
+      planId: payload.planId,
     };
 
     const resultPerson: Person = {
@@ -2199,6 +2207,7 @@ export const studentService = {
         },
         p_student: {
           monthly_fee: payload.monthlyFee,
+          plan_id: payload.planId || null,
           status: payload.status || 'active',
           notes: null,
         },
@@ -2269,6 +2278,7 @@ export const studentService = {
             status: rStudent.status || payload.status || 'active',
             currentGraduations: finalGrads,
             monthlyFee: Number(rStudent.monthly_fee) || payload.monthlyFee,
+            planId: rStudent.plan_id || payload.planId || undefined,
             notes: rStudent.notes || undefined,
           },
           person: {
@@ -2369,12 +2379,15 @@ export const studentService = {
     }
 
     // 2. Atualizar registro na tabela students
-    const studentUpdatePayload = {
+    const studentUpdatePayload: any = {
       monthly_fee: payload.monthlyFee,
       status: payload.status || 'active',
       branch_id: payload.branchId,
       updated_at: new Date().toISOString(),
     };
+    if (payload.planId !== undefined) {
+      studentUpdatePayload.plan_id = payload.planId && isValidUUID(payload.planId) ? payload.planId : null;
+    }
 
     let updatedStudentData: any = null;
     const { data: sSelectData, error: studentError } = await supabase
@@ -2865,6 +2878,7 @@ export const studentService = {
       status: updatedStudentData.status,
       currentGraduations: finalCurrentGraduations,
       monthlyFee: Number(updatedStudentData.monthly_fee) || payload.monthlyFee,
+      planId: updatedStudentData?.plan_id || payload.planId || undefined,
       notes: updatedStudentData.notes || undefined,
     };
 

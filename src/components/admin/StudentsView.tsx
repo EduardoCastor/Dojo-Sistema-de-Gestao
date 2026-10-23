@@ -33,6 +33,7 @@ import {
   BeltRank,
   ClassGroup,
   Enrollment,
+  MembershipPlan,
 } from '../../types';
 import {
   formatDateBR,
@@ -44,6 +45,8 @@ import {
 } from '../../utils/formatters';
 import { validateCPF, cleanCPF } from '../../utils/cpfValidator';
 import { studentService } from '../../services/studentService';
+import { financialService } from '../../services/financialService';
+import { DataStore } from '../../data/storage';
 
 interface StudentsViewProps {
   students: Student[];
@@ -85,6 +88,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [profileTab, setProfileTab] = useState<'id' | 'guardians' | 'anthropometry' | 'health' | 'ranks' | 'classes'>('id');
+
+  // Planos Financeiros para exibição na lista e no perfil
+  const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>(() =>
+    tenantId ? DataStore.getMembershipPlans(tenantId) : []
+  );
+
+  React.useEffect(() => {
+    if (tenantId) {
+      financialService
+        .fetchPlans(tenantId)
+        .then((plans: MembershipPlan[]) => setMembershipPlans(plans))
+        .catch(() => setMembershipPlans(DataStore.getMembershipPlans(tenantId)));
+    }
+  }, [tenantId]);
+
+  const plansMap = useMemo(() => {
+    return new Map(membershipPlans.map((p) => [p.id, p]));
+  }, [membershipPlans]);
 
   // Estado para Edição de Responsável diretamente na aba Famílias & Responsáveis
   const [editingGuardian, setEditingGuardian] = useState<Person | null>(null);
@@ -522,8 +543,19 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           )}
                         </td>
 
-                        <td className="py-3 px-4 font-mono font-medium text-emerald-400">
-                          {formatCurrencyBRL(s.monthlyFee || 0)}
+                        <td className="py-3 px-4">
+                          <div className="font-mono font-medium text-emerald-400">
+                            {formatCurrencyBRL(s.monthlyFee || 0)}
+                          </div>
+                          {s.planId && plansMap.has(s.planId) ? (
+                            <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] text-indigo-300 bg-indigo-950/70 border border-indigo-700/50 px-1.5 py-0.5 rounded font-medium max-w-[170px] truncate" title={plansMap.get(s.planId)!.name}>
+                              {plansMap.get(s.planId)!.name}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 italic block mt-0.5">
+                              Sem plano vinculado
+                            </span>
+                          )}
                         </td>
 
                         <td className="py-3 px-4">
@@ -798,6 +830,33 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     <div className="text-slate-400">Bairro: {activePerson.address?.neighborhood || '-'}</div>
                     <div className="text-slate-400">{activePerson.address?.city || 'São Paulo'} - {activePerson.address?.state || 'SP'}</div>
                     <div className="text-slate-400 font-mono">CEP: {activePerson.address?.zipCode || '-'}</div>
+                  </div>
+
+                  <div className="sm:col-span-2 p-3.5 rounded-lg border border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">Plano de Mensalidade:</span>
+                        {selectedStudent.planId && plansMap.has(selectedStudent.planId) ? (
+                          <span className="inline-flex items-center text-xs font-semibold text-indigo-300 bg-indigo-950/80 border border-indigo-700/60 px-2 py-0.5 rounded">
+                            {plansMap.get(selectedStudent.planId)!.name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic">Sem plano vinculado / Personalizado</span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {selectedStudent.planId && plansMap.has(selectedStudent.planId) && plansMap.get(selectedStudent.planId)!.discountPercentage ? (
+                          <span>Desconto contratual: {plansMap.get(selectedStudent.planId)!.discountPercentage}% · </span>
+                        ) : null}
+                        Matrícula registrada em: <span className="font-mono text-slate-300">{formatDateBR(selectedStudent.enrollmentDate)}</span>
+                      </div>
+                    </div>
+                    <div className="sm:text-right">
+                      <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Mensalidade Efetiva</span>
+                      <span className="text-base font-bold font-mono text-emerald-400">
+                        {formatCurrencyBRL(selectedStudent.monthlyFee || 0)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}

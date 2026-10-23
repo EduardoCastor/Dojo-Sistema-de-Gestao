@@ -24,6 +24,43 @@ export function generateUUID(): string {
   });
 }
 
+/**
+ * Converte competência 'MM/YYYY' para inteiro (YYYY * 12 + MM) para comparação cronológica precisa
+ */
+export function parseCompetenceToInt(comp: string): number {
+  if (!comp || !comp.includes('/')) return 0;
+  const parts = comp.split('/');
+  if (parts.length < 2) return 0;
+  const m = parseInt(parts[0], 10);
+  const y = parseInt(parts[1], 10);
+  if (isNaN(m) || isNaN(y)) return 0;
+  return (y * 12) + m;
+}
+
+/**
+ * Retorna a competência do mês atual ('MM/YYYY')
+ */
+export function getCurrentCompetence(): string {
+  const now = new Date();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const y = now.getFullYear();
+  return `${m}/${y}`;
+}
+
+/**
+ * Retorna a próxima competência mensal ('MM/YYYY')
+ */
+export function getNextCompetence(): string {
+  const now = new Date();
+  let m = now.getMonth() + 2;
+  let y = now.getFullYear();
+  if (m > 12) {
+    m = 1;
+    y += 1;
+  }
+  return `${String(m).padStart(2, '0')}/${y}`;
+}
+
 export interface GenerationResult {
   generatedCount: number;
   skippedCount: number;
@@ -652,8 +689,12 @@ export const financialService = {
         return;
       }
 
-      // Escolher plano
-      const selectedPlan = planId && planId !== 'all' ? plans.find((p) => p.id === planId) : null;
+      // Escolher plano: se não especificado na rotina em lote, respeitar o plano vinculado diretamente ao aluno
+      const selectedPlan = planId && planId !== 'all'
+        ? plans.find((p) => p.id === planId)
+        : st.planId
+        ? plans.find((p) => p.id === st.planId)
+        : null;
       const baseAmount = selectedPlan ? selectedPlan.amount : st.monthlyFee > 0 ? st.monthlyFee : 220.00;
 
       // Calcular desconto familiar (se tiver responsável e já houve outro aluno cobrançado na competência)
@@ -676,7 +717,7 @@ export const financialService = {
         tenantId,
         branchId: st.branchId || branchId !== 'all' ? branchId : 'branch-matriz',
         studentId: st.id,
-        planId: selectedPlan ? selectedPlan.id : undefined,
+        planId: selectedPlan ? selectedPlan.id : st.planId || undefined,
         classGroupId: classGroupId && classGroupId !== 'all' ? classGroupId : undefined,
         competence,
         issueDate: new Date().toISOString().split('T')[0],
@@ -1237,5 +1278,208 @@ export const financialService = {
       console.warn('Aviso ao carregar lembretes:', err.message);
       return DataStore.getPaymentReminders(tenantId);
     }
+  },
+
+  /**
+   * Vincula ou altera o plano financeiro do aluno e ajusta as mensalidades futuras em aberto.
+   * Regras de proteção e negócio:
+   * 1. Mensalidades 'paid' ou com paidAmount > 0: NUNCA são modificadas.
+   * 2. Mensalidades 'partially_paid': Preservam histórico e baixas, NUNCA sofrem alteração automática.
+   * 3. Mensalidades 'overdue' ou vencidas (dueDate < hoje): Preservam dívida anterior, NUNCA sofrem alteração automática.
+   * 4. Cobranças extras (financial_transactions): NUNCA são alteradas.
+   * 5. Apenas mensalidades com status 'pending', paidAmount === 0, balance === finalAmount, dueDate >= hoje
+   *    e competência >= vigência são recalculadas.
+   * 6. Registra histórico e auditoria.
+   */
+  async updateStudentPlanAndFutureInvoices(params: {
+    tenantId: string;
+    studentId: string;
+    newPlanId?: string | null;
+    newMonthlyFee?: number;
+    effectiveCompetence?: string;
+    currentUserName?: string;
+  }): Promise<{
+    updatedInvoicesCount: number;
+    updatedInvoices: Invoice[];
+    newPlanName?: string;
+    message: string;
+  }> {
+    const {
+      tenantId,
+      studentId,
+      newPlanId,
+      newMonthlyFee,
+      effectiveCompetence,
+      currentUserName = 'Administrador',
+    } = params;
+
+    const today = new Date().toISOString().split('T')[0];
+    const targetComp = effectiveCompetence || getNextCompetence();
+    const targetCompInt = parseCompetenceToInt(targetComp);
+
+    // 1. Obter informações do novo plano
+    const allPlans = await this.fetchPlans(tenantId);
+    const selectedPlan = newPlanId ? allPlans.find((p) => p.id === newPlanId) : null;
+
+    let planAmount = 0;
+    let discountAmount = 0;
+    let discountDescription: string | undefined = undefined;
+    let finalAmount = 0;
+    let planName = 'Personalizado / Sem plano';
+
+    if (selectedPlan) {
+      planAmount = Number(selectedPlan.amount);
+      if (selectedPlan.discountPercentage && selectedPlan.discountPercentage > 0) {
+        discountAmount = Math.round((planAmount * (selectedPlan.discountPercentage / 100)) * 100) / 100;
+        discountDescription = selectedPlan.discountDescription || `${selectedPlan.discountPercentage}% desconto do plano`;
+      }
+      finalAmount = Math.round(Math.max(0, planAmount - discountAmount) * 100) / 100;
+      planName = selectedPlan.name;
+    } else {
+      planAmount = newMonthlyFee !== undefined ? Number(newMonthlyFee) : 0;
+      finalAmount = planAmount;
+    }
+
+    let updatedCount = 0;
+    const nowISO = new Date().toISOString();
+
+    // 2. Se Supabase estiver conectado, tentar executar via RPC atômica update_student_plan_and_invoices
+    if (isSupabaseConfigured() && supabase && isValidUUID(tenantId) && isValidUUID(studentId)) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('update_student_plan_and_invoices', {
+          p_tenant_id: tenantId,
+          p_student_id: studentId,
+          p_new_plan_id: selectedPlan && isValidUUID(selectedPlan.id) ? selectedPlan.id : null,
+          p_new_monthly_fee: finalAmount,
+          p_effective_competence: targetComp,
+          p_user_name: currentUserName,
+        });
+
+        if (!rpcErr && rpcData?.success) {
+          updatedCount = rpcData.updated_invoices_count || 0;
+        } else if (rpcErr) {
+          console.warn('RPC update_student_plan_and_invoices fallback para REST:', rpcErr.message);
+          // Fallback REST no Supabase
+          // 2.1 Atualizar estudante
+          await supabase
+            .from('students')
+            .update({
+              plan_id: selectedPlan && isValidUUID(selectedPlan.id) ? selectedPlan.id : null,
+              monthly_fee: finalAmount,
+              updated_at: nowISO,
+            })
+            .eq('id', studentId)
+            .eq('tenant_id', tenantId);
+
+          // 2.2 Buscar e atualizar faturas elegíveis
+          const { data: candidateInvoices } = await supabase
+            .from('invoices')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .eq('student_id', studentId)
+            .eq('status', 'pending');
+
+          const toUpdate = (candidateInvoices || []).filter((inv: any) => {
+            const isZeroPaid = Number(inv.paid_amount || 0) === 0;
+            const isFullBalance = Number(inv.balance) === Number(inv.final_amount);
+            const isNotOverdue = !inv.due_date || inv.due_date >= today;
+            const isFutureComp = parseCompetenceToInt(inv.competence) >= targetCompInt;
+            return isZeroPaid && isFullBalance && isNotOverdue && isFutureComp;
+          });
+
+          for (const inv of toUpdate) {
+            await supabase
+              .from('invoices')
+              .update({
+                plan_id: selectedPlan && isValidUUID(selectedPlan.id) ? selectedPlan.id : null,
+                original_amount: planAmount,
+                discount_amount: discountAmount,
+                discount_description: discountDescription || null,
+                final_amount: finalAmount,
+                balance: finalAmount,
+                updated_at: nowISO,
+              })
+              .eq('id', inv.id)
+              .eq('tenant_id', tenantId);
+            updatedCount++;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Aviso na atualização de plano no Supabase:', err.message);
+      }
+    }
+
+    // 3. Atualizar DataStore local (garante consistência total em SSR, offline e no estado do app)
+    const localInvoices = DataStore.getInvoices(tenantId);
+    let localUpdatedCount = 0;
+
+    const nextInvoices = localInvoices.map((inv) => {
+      const isTargetStudent = inv.studentId === studentId;
+      const isPending = inv.status === 'pending';
+      const isZeroPaid = (inv.paidAmount || 0) === 0;
+      const isFullBalance = inv.balance === inv.finalAmount;
+      const isNotOverdue = !inv.dueDate || inv.dueDate >= today;
+      const isFutureComp = parseCompetenceToInt(inv.competence) >= targetCompInt;
+
+      if (isTargetStudent && isPending && isZeroPaid && isFullBalance && isNotOverdue && isFutureComp) {
+        localUpdatedCount++;
+        const oldAmount = inv.finalAmount;
+        return {
+          ...inv,
+          planId: selectedPlan ? selectedPlan.id : undefined,
+          originalAmount: planAmount,
+          discountAmount,
+          discountDescription,
+          finalAmount,
+          balance: finalAmount,
+          auditTrail: [
+            ...(inv.auditTrail || []),
+            {
+              date: nowISO,
+              action: `Plano alterado para "${planName}". Mensalidade recalculada de R$ ${oldAmount.toFixed(2)} para R$ ${finalAmount.toFixed(2)} a partir da competência ${targetComp}.`,
+              userName: currentUserName,
+            },
+          ],
+        };
+      }
+      return inv;
+    });
+
+    DataStore.saveInvoices(nextInvoices);
+
+    // Atualizar estudante no DataStore
+    const localStudents = DataStore.getStudents(tenantId);
+    const updatedLocalStudents = localStudents.map((st) => {
+      if (st.id === studentId) {
+        return {
+          ...st,
+          planId: selectedPlan ? selectedPlan.id : undefined,
+          monthlyFee: finalAmount,
+        };
+      }
+      return st;
+    });
+    DataStore.saveStudents(updatedLocalStudents);
+
+    // Auditoria
+    const finalCount = updatedCount > 0 ? updatedCount : localUpdatedCount;
+    const msg = `Plano vinculado: "${planName}". Mensalidade: R$ ${finalAmount.toFixed(2)}. ${finalCount} faturas futuras ajustadas (vigência a partir de ${targetComp}).`;
+
+    DataStore.logAudit(
+      tenantId,
+      'user-system',
+      currentUserName,
+      'Troca de Plano de Aluno',
+      'Student',
+      studentId,
+      msg
+    );
+
+    return {
+      updatedInvoicesCount: finalCount,
+      updatedInvoices: nextInvoices,
+      newPlanName: planName,
+      message: msg,
+    };
   },
 };

@@ -552,6 +552,7 @@ export const INITIAL_STUDENTS: Student[] = [
     branchId: 'branch-matriz',
     personId: 'person-lucas',
     registrationNumber: 'KOD-2025-001',
+    planId: 'c1000000-0000-4000-8000-000000000001',
     enrollmentDate: '2025-01-15',
     status: 'active',
     currentGraduations: [
@@ -573,6 +574,7 @@ export const INITIAL_STUDENTS: Student[] = [
     branchId: 'branch-matriz',
     personId: 'person-sofia',
     registrationNumber: 'KOD-2025-014',
+    planId: 'c1000000-0000-4000-8000-000000000001',
     enrollmentDate: '2025-02-10',
     status: 'active',
     currentGraduations: [
@@ -594,6 +596,7 @@ export const INITIAL_STUDENTS: Student[] = [
     branchId: 'branch-matriz',
     personId: 'person-gabriel',
     registrationNumber: 'KOD-2024-009',
+    planId: 'c1000000-0000-4000-8000-000000000004',
     enrollmentDate: '2024-03-01',
     status: 'active',
     currentGraduations: [
@@ -615,6 +618,7 @@ export const INITIAL_STUDENTS: Student[] = [
     branchId: 'branch-matriz',
     personId: 'person-beatriz',
     registrationNumber: 'KOD-2025-042',
+    planId: 'c1000000-0000-4000-8000-000000000003',
     enrollmentDate: '2025-05-10',
     status: 'active',
     currentGraduations: [
@@ -1021,6 +1025,33 @@ export const INITIAL_INVOICES: Invoice[] = [
       {
         date: '2026-10-15T08:00:00Z',
         action: 'Emissão antecipada de competência Novembro/2026',
+        userName: 'Roberto Alves (Financeiro)',
+      },
+    ],
+  },
+  {
+    id: 'a1000000-0000-4000-8000-000000000005',
+    tenantId: 'tenant-kodokan',
+    branchId: 'branch-matriz',
+    studentId: 'student-lucas',
+    financialGuardianId: 'person-marcos',
+    planId: 'c1000000-0000-4000-8000-000000000001',
+    classGroupId: 'class-judo-infantil',
+    competence: '12/2026',
+    issueDate: '2026-10-15',
+    dueDate: '2026-12-10',
+    originalAmount: 220,
+    discountAmount: 0,
+    penaltyAndInterestAmount: 0,
+    finalAmount: 220,
+    paidAmount: 0,
+    balance: 220,
+    status: 'pending',
+    pixCode: '00020126580014br.gov.bcb.pix0136123e4567-e89b-12d3-a456-4266141740005204000053039865406220.005802BR5925KODOKAN JUDO BRASIL6009SAO PAULO62070503***6304OPQR',
+    auditTrail: [
+      {
+        date: '2026-10-15T08:00:00Z',
+        action: 'Emissão antecipada de competência Dezembro/2026',
         userName: 'Roberto Alves (Financeiro)',
       },
     ],
