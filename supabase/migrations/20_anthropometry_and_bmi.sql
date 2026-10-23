@@ -19,25 +19,26 @@ CREATE INDEX IF NOT EXISTS idx_physical_assessments_tenant_student_date
 -- 3. HABILITAR E CONFIGURAR ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.physical_assessments ENABLE ROW LEVEL SECURITY;
 
+
 -- 3.1 POLÍTICA DE LEITURA (SELECT)
--- Usuários autorizados da academia (owners, gerentes, secretários, instrutores, financeiro)
--- ou o próprio aluno autenticado.
-DROP POLICY IF EXISTS "physical_assessments_select" ON public.physical_assessments;
-CREATE POLICY "physical_assessments_select" ON public.physical_assessments
-FOR SELECT TO authenticated
+-- Staff autorizado da academia ou o próprio aluno,
+-- quando houver vínculo explícito com a conta autenticada.
+
+DROP POLICY IF EXISTS "physical_assessments_select"
+ON public.physical_assessments;
+
+CREATE POLICY "physical_assessments_select"
+ON public.physical_assessments
+FOR SELECT
+TO authenticated
 USING (
-  public.has_tenant_role(tenant_id, 'owner', 'branch_manager', 'secretary', 'instructor', 'financial')
-  OR (
-    -- Aluno visualizando seu próprio histórico biométrico
-    EXISTS (
-      SELECT 1 FROM public.students s
-      JOIN public.profiles pr ON pr.id = auth.uid()
-      WHERE s.id = physical_assessments.student_id
-        AND s.tenant_id = physical_assessments.tenant_id
-        AND pr.email = (
-          SELECT email FROM public.persons p WHERE p.id = s.person_id
-        )
-    )
+  public.has_tenant_role(
+    tenant_id,
+    'owner',
+    'branch_manager',
+    'secretary',
+    'instructor',
+    'financial'
   )
 );
 
