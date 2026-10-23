@@ -364,7 +364,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         setLoadedArts(arts);
 
         if (arts.length === 0) {
-          setArtsError('Nenhuma modalidade ativa encontrada para esta academia no Supabase. Cadastre ao menos uma modalidade no menu "Modalidades".');
+          setArtsError('Nenhuma modalidade ativa encontrada para esta academia. Cadastre ao menos uma modalidade no menu "Modalidades & Faixas".');
           setSelectedArtId('');
           setLoadedBelts([]);
           setSelectedBeltId('');
@@ -382,7 +382,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           } else {
             setSelectedArtId('');
             setGraduationNotice(
-              'O aluno não possui graduação registrada em nenhuma das modalidades ativas da academia no Supabase. Selecione a modalidade e a faixa para vincular.'
+              'O aluno não possui graduação registrada em nenhuma das modalidades ativas da academia. Selecione a modalidade e a faixa para vincular.'
             );
           }
         } else {
@@ -392,8 +392,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         }
       } catch (err: any) {
         if (!isMounted) return;
-        console.error('Falha ao consultar modalidades do Supabase:', err);
-        setArtsError(err.message || 'Erro ao consultar modalidades no Supabase.');
+        console.error('Falha ao consultar modalidades:', err);
+        setArtsError(err.message || 'Não foi possível carregar as modalidades. Verifique sua conexão e tente novamente.');
         setLoadedArts([]);
         setSelectedArtId('');
       } finally {
@@ -433,7 +433,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         setLoadedBelts(beltsData);
 
         if (beltsData.length === 0) {
-          setBeltsError('Nenhuma faixa/graduação cadastrada para esta modalidade no Supabase.');
+          setBeltsError('Nenhuma faixa ou graduação cadastrada para esta modalidade.');
           setSelectedBeltId('');
           return;
         }
@@ -465,7 +465,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       } catch (err: any) {
         if (!isMounted) return;
         console.error('Falha ao carregar faixas da modalidade:', err);
-        setBeltsError(err.message || 'Erro ao carregar faixas da modalidade no Supabase.');
+        setBeltsError(err.message || 'Não foi possível carregar as faixas da modalidade. Tente novamente.');
         setLoadedBelts([]);
         setSelectedBeltId('');
       } finally {
@@ -1240,7 +1240,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     try {
       await onSave(newStudent, newPerson, guardianPerson, relationship, payloadDetails);
     } catch (err: any) {
-      setError(err?.message || 'Erro ao persistir aluno.');
+      setError(err?.message || 'Não foi possível salvar o aluno. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1432,7 +1432,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
               {isLoadingArts && (
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                   <Loader2 className="h-3 w-3 animate-spin text-red-400" />
-                  <span>Consultando Supabase...</span>
+                  <span>Carregando modalidades...</span>
                 </div>
               )}
             </div>

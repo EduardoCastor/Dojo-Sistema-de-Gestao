@@ -570,7 +570,7 @@ export default function App() {
           'Matrícula de Aluno',
           'Student',
           result.student.id,
-          `Matriculado o aluno ${result.person.fullName} no banco de dados.`
+          `Matrícula do aluno(a) ${result.person.fullName} confirmada.`
         );
 
         await handleRefreshStudents();

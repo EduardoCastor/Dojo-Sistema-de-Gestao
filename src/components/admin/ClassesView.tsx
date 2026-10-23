@@ -375,7 +375,7 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
         setIsFormModalOpen(false);
       }, 700);
     } catch (err: any) {
-      setFormError(err?.message || 'Falha ao salvar turma no banco de dados.');
+      setFormError(err?.message || 'Não foi possível salvar a turma. Tente novamente.');
     } finally {
       setIsSaving(false);
     }
@@ -621,7 +621,7 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
           {onRefreshData && (
             <button
               onClick={() => onRefreshData()}
-              title="Recarregar turmas e horários do Supabase"
+              title="Recarregar turmas e horários"
               className="p-2 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <RefreshCw className="h-4 w-4" />

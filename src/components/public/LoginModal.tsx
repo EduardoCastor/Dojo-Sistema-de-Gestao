@@ -153,7 +153,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            Autenticação de Dados
+            Entrar com E-mail e Senha
           </button>
           <button
             onClick={() => setActiveTab('personas')}
@@ -163,7 +163,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            Personas Locais (Teste Rápido)
+            Perfis de Demonstração
           </button>
         </div>
 
@@ -173,22 +173,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <div className="p-4 rounded-xl border border-amber-600/40 bg-amber-950/30 text-xs text-amber-200 space-y-2 mb-4">
                 <div className="font-bold flex items-center gap-1.5 text-amber-300">
                   <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span>Variáveis de Conexão de Dados Pendentes</span>
+                  <span>Modo de Demonstração Ativo</span>
                 </div>
                 <p className="leading-relaxed">
-                  Para utilizar a autenticação e persistência real de dados na nuvem, configure as variáveis:
-                  <br />
-                  <code className="text-[11px] bg-slate-900 px-1.5 py-0.5 rounded text-white font-mono">
-                    VITE_SUPABASE_URL
-                  </code>{' '}
-                  e{' '}
-                  <code className="text-[11px] bg-slate-900 px-1.5 py-0.5 rounded text-white font-mono">
-                    VITE_SUPABASE_PUBLISHABLE_KEY
-                  </code>.
+                  A autenticação na nuvem ainda não está configurada neste ambiente. Para explorar e testar todas as funcionalidades do sistema, utilize a aba <strong>Perfis de Demonstração</strong>.
                 </p>
-                <div className="pt-1 text-[11px] text-slate-300">
-                  Enquanto isso, você pode utilizar a aba <strong>Personas Locais</strong> para avaliar as interfaces.
-                </div>
               </div>
             ) : (
               <div className="space-y-4">

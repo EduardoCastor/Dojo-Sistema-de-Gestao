@@ -122,12 +122,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         const session = sessionData.session;
         if (!session?.user) {
           setError(
-            'Acesso negado: o usuário precisa estar autenticado no Supabase Auth para cadastrar uma academia.'
+            'Acesso restrito: faça login na plataforma antes de registrar uma nova academia.'
           );
           setDetailedError({
-            message: 'Nenhuma sessão ativa encontrada via supabase.auth.getSession().',
-            code: '42501',
-            hint: 'Efetue login na plataforma antes de registrar a academia.',
+            message: 'Nenhuma sessão de usuário ativa encontrada.',
+            code: 'AUTH_REQUIRED',
+            hint: 'Acesse sua conta para continuar o cadastro.',
           });
           setLoading(false);
           return;
@@ -157,27 +157,27 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
 
         // 4. Tratamento de erro detalhado do Supabase
         if (rpcError) {
-          console.error('Erro retornado por register_academy_atomic:', rpcError);
+          console.error('Erro ao cadastrar academia:', rpcError);
           setDetailedError({
-            message: rpcError.message || 'Falha ao executar register_academy_atomic',
+            message: rpcError.message || 'Falha ao cadastrar academia.',
             code: rpcError.code,
             details: rpcError.details,
             hint: rpcError.hint,
           });
-          setError(rpcError.message || 'Erro ao registrar academia no banco de dados.');
+          setError(rpcError.message || 'Não foi possível cadastrar a academia. Tente novamente.');
           setLoading(false);
-          // IMPORTANTE: Não cria dados fictícios em caso de erro no banco
+          // IMPORTANTE: Não cria dados fictícios em caso de erro no servidor
           return;
         }
 
         // 5. Validação da confirmação de sucesso
         if (!data || data.success !== true) {
-          console.error('Retorno inesperado da função RPC:', data);
+          console.error('Retorno inesperado:', data);
           setDetailedError({
-            message: 'A função register_academy_atomic não retornou success=true.',
+            message: 'A operação não pôde ser confirmada pelo servidor.',
             details: typeof data === 'object' ? JSON.stringify(data) : String(data),
           });
-          setError('A criação da academia não pôde ser confirmada pelo banco.');
+          setError('Não foi possível confirmar o cadastro da academia. Tente novamente.');
           setLoading(false);
           return;
         }
@@ -210,12 +210,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       } catch (err: any) {
         console.error('Exceção capturada no cadastro de academia:', err);
         setDetailedError({
-          message: err.message || 'Erro inesperado na chamada ao Supabase.',
+          message: err.message || 'Erro inesperado ao registrar academia.',
           code: err.code || 'UNKNOWN_ERROR',
           details: err.details || null,
           hint: err.hint || null,
         });
-        setError(err.message || 'Falha na comunicação com o banco de dados.');
+        setError(err.message || 'Não foi possível concluir o cadastro. Verifique sua conexão e tente novamente.');
         setLoading(false);
       }
       return;
@@ -364,17 +364,17 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           <div className="mb-4 p-3 rounded-lg bg-red-950/70 border border-red-500/70 text-xs text-red-200 space-y-1.5">
             <div className="flex items-center gap-2 font-bold text-red-300">
               <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-              <span>Erro retornado pelo banco de dados (RPC register_academy_atomic):</span>
+              <span>Não foi possível concluir o cadastro da academia:</span>
             </div>
             {detailedError.message && (
               <div>
-                <span className="font-semibold text-slate-300">Mensagem (message): </span>
+                <span className="font-semibold text-slate-300">Mensagem: </span>
                 <span className="text-white">{detailedError.message}</span>
               </div>
             )}
             {detailedError.code && (
               <div>
-                <span className="font-semibold text-slate-300">Código (code): </span>
+                <span className="font-semibold text-slate-300">Código de referência: </span>
                 <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono text-[11px]">
                   {detailedError.code}
                 </code>
@@ -382,13 +382,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             )}
             {detailedError.details && (
               <div>
-                <span className="font-semibold text-slate-300">Detalhes (details): </span>
+                <span className="font-semibold text-slate-300">Informação complementar: </span>
                 <span className="text-slate-300">{detailedError.details}</span>
               </div>
             )}
             {detailedError.hint && (
               <div>
-                <span className="font-semibold text-slate-300">Dica (hint): </span>
+                <span className="font-semibold text-slate-300">Orientação: </span>
                 <span className="text-emerald-300">{detailedError.hint}</span>
               </div>
             )}

@@ -1078,7 +1078,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
                             <div className="flex items-center justify-end gap-1.5">
                               {inv.balance > 0 && inv.status !== 'canceled' && (
                                 <button
-                                  onClick={() => handleOpenSettleModal(inv)}
+                                  onClick={() => handleOpenSettleInvoice(inv)}
                                   title="Registrar pagamento ou baixa parcial"
                                   className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-semibold transition-colors cursor-pointer"
                                 >
@@ -1408,11 +1408,11 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       {/* ============================================================== */}
       {/* MODAL DE BAIXA / REGISTRO DE PAGAMENTO                         */}
       {/* ============================================================== */}
-      {settlingInvoice && (
+      {settlingTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="relative w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200 text-xs">
             <button
-              onClick={() => setSettlingInvoice(null)}
+              onClick={() => setSettlingTarget(null)}
               disabled={isSubmittingPayment}
               className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             >
@@ -1421,79 +1421,122 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
             <div className="flex items-center gap-2 mb-3 text-emerald-400">
               <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              <h3 className="text-base font-bold text-white">Registrar Pagamento de Cobrança</h3>
+              <h3 className="text-base font-bold text-white">
+                {settlingTarget.type === 'invoice' ? 'Registrar Pagamento de Cobrança' : 'Registrar Baixa de Lançamento'}
+              </h3>
             </div>
 
             <p className="text-slate-400 mb-3">
-              Informe o valor recebido e a forma de pagamento para atualizar o saldo do aluno.
+              Informe o valor recebido e a forma de pagamento para atualizar o saldo.
             </p>
 
             <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 mb-4 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Aluno:</span>
-                <span className="font-bold text-white">
-                  {getStudentAndPerson(settlingInvoice.studentId).person?.fullName || 'N/A'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Competência:</span>
-                <span className="font-mono text-slate-300">{settlingInvoice.competence}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Saldo Atual Devedor:</span>
-                <span className="font-mono font-bold text-red-400">{formatCurrencyBRL(settlingInvoice.balance)}</span>
-              </div>
+              {settlingTarget.type === 'invoice' ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Aluno:</span>
+                    <span className="font-bold text-white">
+                      {getStudentAndPerson(settlingTarget.data.studentId).person?.fullName || 'N/A'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Competência:</span>
+                    <span className="font-mono text-slate-300">{settlingTarget.data.competence}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Saldo Atual Devedor:</span>
+                    <span className="font-mono font-bold text-red-400">{formatCurrencyBRL(settlingTarget.data.balance)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Descrição:</span>
+                    <span className="font-bold text-white">{settlingTarget.data.description}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Competência:</span>
+                    <span className="font-mono text-slate-300">{settlingTarget.data.competence}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Saldo Pendente:</span>
+                    <span className="font-mono font-bold text-red-400">
+                      {formatCurrencyBRL(
+                        settlingTarget.data.balance !== undefined
+                          ? settlingTarget.data.balance
+                          : (settlingTarget.data.status === 'completed' ? 0 : Math.max(0, settlingTarget.data.amount - (settlingTarget.data.paidAmount || 0)))
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Valor do Pagamento (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  max={settlingInvoice.balance}
-                  value={settleAmount}
-                  onChange={(e) => setSettleAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white font-mono font-bold text-sm focus:outline-none focus:border-red-500"
-                />
-                {settleAmount < settlingInvoice.balance && (
-                  <span className="text-[11px] text-amber-400 mt-1 block">
-                    Pagamento parcial: o saldo remanescente será de {formatCurrencyBRL(settlingInvoice.balance - settleAmount)}.
-                  </span>
-                )}
-              </div>
+            {(() => {
+              const currentBalance = settlingTarget.type === 'invoice'
+                ? settlingTarget.data.balance
+                : (settlingTarget.data.balance !== undefined
+                    ? settlingTarget.data.balance
+                    : (settlingTarget.data.status === 'completed' ? 0 : Math.max(0, settlingTarget.data.amount - (settlingTarget.data.paidAmount || 0))));
 
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Forma de Pagamento</label>
-                <select
-                  value={settleMethod}
-                  onChange={(e) => setSettleMethod(e.target.value as any)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
-                >
-                  <option value="pix">PIX Instantâneo</option>
-                  <option value="cash">Dinheiro em Espécie</option>
-                  <option value="credit_card">Cartão de Crédito / Débito</option>
-                  <option value="boleto">Boleto Bancário</option>
-                </select>
-              </div>
+              return (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Valor do Pagamento (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max={currentBalance}
+                      value={settleAmount}
+                      onChange={(e) => setSettleAmount(parseFloat(e.target.value) || 0)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white font-mono font-bold text-sm focus:outline-none focus:border-red-500"
+                    />
+                    {settleAmount < currentBalance && (
+                      <span className="text-[11px] text-amber-400 mt-1 block">
+                        Pagamento parcial: o saldo remanescente será de {formatCurrencyBRL(currentBalance - settleAmount)}.
+                      </span>
+                    )}
+                  </div>
 
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Observações do Recibo (Opcional)</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Pago na recepção em dinheiro..."
-                  value={settleNotes}
-                  onChange={(e) => setSettleNotes(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
-                />
-              </div>
-            </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Forma de Pagamento</label>
+                    <select
+                      value={settleMethod}
+                      onChange={(e) => setSettleMethod(e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
+                    >
+                      <option value="pix">PIX Instantâneo</option>
+                      <option value="cash">Dinheiro em Espécie</option>
+                      <option value="credit_card">Cartão de Crédito / Débito</option>
+                      <option value="boleto">Boleto Bancário</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Observações do Recibo (Opcional)</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Pago na recepção em dinheiro..."
+                      value={settleNotes}
+                      onChange={(e) => setSettleNotes(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
+                    />
+                  </div>
+
+                  {settleError && (
+                    <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-[11px]">
+                      {settleError}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => setSettlingInvoice(null)}
+                onClick={() => setSettlingTarget(null)}
                 disabled={isSubmittingPayment}
                 className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
               >

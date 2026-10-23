@@ -911,7 +911,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   )}
 
                   <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400">
-                    <span className="font-semibold text-amber-300">Nota técnica:</span> O Índice de Massa Corporal (IMC) é exibido apenas como indicador biométrico auxiliar e não substitui avaliação médica clínica. Categorias de peso para torneios respeitam as tabelas oficiais da federação (ex: CBJ).
+                    <span className="font-semibold text-amber-300">Aviso:</span> O Índice de Massa Corporal (IMC) é exibido apenas como indicador biométrico auxiliar e não substitui avaliação médica clínica. Categorias de peso para torneios respeitam as regras oficiais da federação.
                   </div>
 
                   {activeAssessments.length > 0 && (

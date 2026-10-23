@@ -216,7 +216,7 @@ export const financialService = {
 
       if (updateError) {
         console.error('Erro ao atualizar fatura no Supabase:', updateError);
-        throw new Error(`Falha ao persistir baixa no banco de dados: ${updateError.message}`);
+        throw new Error(`Não foi possível registrar o pagamento: ${updateError.message}`);
       }
 
       // Registrar na tabela invoice_payments se existir
@@ -941,7 +941,7 @@ export const financialService = {
 
       if (updateError) {
         console.error('Erro ao atualizar lançamento no Supabase:', updateError);
-        throw new Error(`Falha ao registrar baixa no banco de dados: ${updateError.message}`);
+        throw new Error(`Não foi possível registrar a baixa: ${updateError.message}`);
       }
     }
 
@@ -1036,7 +1036,9 @@ export const financialService = {
       bodySnippet: payload.body.slice(0, 140) + '...',
       sentAt: nowISO,
       status: 'sent',
-      providerResponse: 'Disparo de cobrança confirmado com sucesso pelo provedor.',
+      providerResponse: isSupabaseConfigured()
+        ? 'Lembrete de cobrança registrado e encaminhado com sucesso.'
+        : 'Lembrete de cobrança registrado no histórico da fatura (modo de avaliação).',
       sentByUserId: payload.sentByUserId,
     };
 
