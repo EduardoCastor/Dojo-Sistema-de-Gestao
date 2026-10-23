@@ -55,22 +55,35 @@ import {
 } from './initialData';
 
 const STORAGE_PREFIX = 'tatamehub_';
+const memoryStorage = new Map<string, string>();
 
 function load<T>(key: string, fallback: T): T {
   try {
-    const item = localStorage.getItem(STORAGE_PREFIX + key);
+    if (typeof localStorage !== 'undefined') {
+      const item = localStorage.getItem(STORAGE_PREFIX + key);
+      return item ? JSON.parse(item) : fallback;
+    }
+    const item = memoryStorage.get(STORAGE_PREFIX + key);
     return item ? JSON.parse(item) : fallback;
   } catch (err) {
-    console.error(`Error loading ${key} from storage:`, err);
     return fallback;
   }
 }
 
 function save<T>(key: string, value: T): void {
   try {
-    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+      return;
+    }
+    memoryStorage.set(STORAGE_PREFIX + key, JSON.stringify(value));
   } catch (err) {
-    console.error(`Error saving ${key} to storage:`, err);
+    // In-memory fallback
+    try {
+      memoryStorage.set(STORAGE_PREFIX + key, JSON.stringify(value));
+    } catch {
+      // ignore
+    }
   }
 }
 

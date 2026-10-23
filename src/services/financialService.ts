@@ -13,6 +13,17 @@ import {
 } from '../types';
 import { DataStore } from '../data/storage';
 
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export interface GenerationResult {
   generatedCount: number;
   skippedCount: number;
@@ -198,25 +209,101 @@ export const financialService = {
     };
 
     // 1. Atualizar no Supabase se configurado
-    if (isSupabaseConfigured() && supabase && isValidUUID(invoiceId) && isValidUUID(tenantId)) {
-      const { error: updateError } = await supabase
-        .from('invoices')
-        .update({
-          paid_amount: newPaidAmount,
-          balance: newBalance,
-          status: newStatus,
-          payment_date: today,
-          payment_method: payload.paymentMethod,
-          receipt_number: receipt,
-          notes: payload.notes || invoice.notes || null,
-          updated_at: nowISO,
-        })
-        .eq('id', invoiceId)
-        .eq('tenant_id', tenantId);
+    let targetInvoiceId = invoiceId;
+    if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
+      if (isValidUUID(invoiceId)) {
+        const { error: updateError } = await supabase
+          .from('invoices')
+          .update({
+            paid_amount: newPaidAmount,
+            balance: newBalance,
+            status: newStatus,
+            payment_date: today,
+            payment_method: payload.paymentMethod,
+            receipt_number: receipt,
+            notes: payload.notes || invoice.notes || null,
+            updated_at: nowISO,
+          })
+          .eq('id', invoiceId)
+          .eq('tenant_id', tenantId);
 
-      if (updateError) {
-        console.error('Erro ao atualizar fatura no Supabase:', updateError);
-        throw new Error(`Não foi possível registrar o pagamento: ${updateError.message}`);
+        if (updateError) {
+          console.error('Erro ao atualizar fatura no Supabase:', updateError);
+          throw new Error(`Não foi possível registrar o pagamento: ${updateError.message}`);
+        }
+      } else {
+        // Se o ID original não era UUID válido, verificar se já existe no banco por tenant + student + competence
+        let resolvedId: string | null = null;
+        if (isValidUUID(invoice.studentId)) {
+          try {
+            const { data: found } = await supabase
+              .from('invoices')
+              .select('id')
+              .eq('tenant_id', tenantId)
+              .eq('student_id', invoice.studentId)
+              .eq('competence', invoice.competence)
+              .maybeSingle();
+            if (found?.id) resolvedId = found.id;
+          } catch (findErr) {
+            console.warn('Aviso ao consultar fatura equivalente:', findErr);
+          }
+        }
+
+        if (resolvedId) {
+          targetInvoiceId = resolvedId;
+          const { error: updateErr } = await supabase
+            .from('invoices')
+            .update({
+              paid_amount: newPaidAmount,
+              balance: newBalance,
+              status: newStatus,
+              payment_date: today,
+              payment_method: payload.paymentMethod,
+              receipt_number: receipt,
+              notes: payload.notes || invoice.notes || null,
+              updated_at: nowISO,
+            })
+            .eq('id', resolvedId)
+            .eq('tenant_id', tenantId);
+
+          if (updateErr) {
+            console.error('Erro ao atualizar fatura resolvida:', updateErr);
+            throw new Error(`Não foi possível registrar o pagamento: ${updateErr.message}`);
+          }
+        } else {
+          // Inserir registro com UUID padrão
+          const newId = generateUUID();
+          targetInvoiceId = newId;
+          const { error: insertErr } = await supabase.from('invoices').insert({
+            id: newId,
+            tenant_id: tenantId,
+            branch_id: isValidUUID(invoice.branchId) ? invoice.branchId : null,
+            student_id: isValidUUID(invoice.studentId) ? invoice.studentId : null,
+            plan_id: invoice.planId && isValidUUID(invoice.planId) ? invoice.planId : null,
+            class_group_id: invoice.classGroupId && isValidUUID(invoice.classGroupId) ? invoice.classGroupId : null,
+            competence: invoice.competence,
+            issue_date: invoice.issueDate,
+            due_date: invoice.dueDate,
+            original_amount: invoice.originalAmount,
+            discount_amount: invoice.discountAmount,
+            discount_description: invoice.discountDescription || null,
+            penalty_and_interest: invoice.penaltyAndInterestAmount,
+            final_amount: invoice.finalAmount,
+            paid_amount: newPaidAmount,
+            balance: newBalance,
+            status: newStatus,
+            payment_date: today,
+            payment_method: payload.paymentMethod,
+            receipt_number: receipt,
+            notes: payload.notes || invoice.notes || null,
+          });
+
+          if (insertErr) {
+            console.error('Erro ao inserir fatura no Supabase durante baixa:', insertErr);
+            throw new Error(`Não foi possível registrar o pagamento: ${insertErr.message}`);
+          }
+        }
+        updatedInvoice.id = targetInvoiceId;
       }
 
       // Registrar na tabela invoice_payments se existir
@@ -233,7 +320,7 @@ export const financialService = {
 
         const { error: paymentError } = await supabase.from('invoice_payments').insert({
           tenant_id: tenantId,
-          invoice_id: invoiceId,
+          invoice_id: targetInvoiceId,
           amount: payAmount,
           payment_date: today,
           payment_method: payload.paymentMethod,
@@ -252,9 +339,13 @@ export const financialService = {
     }
 
     // 2. Atualizar cache local
-    const updatedList = currentInvoices.some((i) => i.id === invoiceId)
-      ? currentInvoices.map((i) => (i.id === invoiceId ? updatedInvoice : i))
-      : [updatedInvoice, ...currentInvoices];
+    const updatedList = currentInvoices.map((i) =>
+      i.id === invoiceId || i.id === updatedInvoice.id ? updatedInvoice : i
+    );
+
+    if (!updatedList.some((i) => i.id === updatedInvoice.id)) {
+      updatedList.unshift(updatedInvoice);
+    }
 
     DataStore.saveInvoices(updatedList);
     return updatedInvoice;
@@ -575,7 +666,7 @@ export const financialService = {
       }
 
       const finalAmount = Math.round(Math.max(0, baseAmount - discountAmount) * 100) / 100;
-      const invId = `inv-${compYear}-${String(compMonth).padStart(2, '0')}-${st.id.slice(0, 8)}-${Date.now().toString().slice(-4)}`;
+      const invId = generateUUID();
 
       // Gerar código PIX copia e cola padronizado
       const pixCode = `00020126580014br.gov.bcb.pix0136${tenantId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 32)}5204000053039865406${finalAmount.toFixed(2)}5802BR5915TATAMEHUB DOJO6009SAO PAULO62070503***6304${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
@@ -616,6 +707,7 @@ export const financialService = {
     if (newInvoices.length > 0 && isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
       try {
         const rowsToInsert = newInvoices.map((inv) => ({
+          id: inv.id,
           tenant_id: inv.tenantId,
           branch_id: isValidUUID(inv.branchId) ? inv.branchId : null,
           student_id: isValidUUID(inv.studentId) ? inv.studentId : null,
@@ -742,7 +834,7 @@ export const financialService = {
       throw new Error('O valor do lançamento deve ser maior que zero.');
     }
 
-    let txId = `tx-${Date.now()}`;
+    let txId = generateUUID();
     const nowISO = new Date().toISOString();
     const isPending = payload.status === 'pending';
     const paidAmount = isPending ? 0 : payload.amount;
@@ -753,6 +845,7 @@ export const financialService = {
         const { data, error } = await supabase
           .from('financial_transactions')
           .insert({
+            id: txId,
             tenant_id: payload.tenantId,
             branch_id: payload.branchId && isValidUUID(payload.branchId) ? payload.branchId : null,
             type: payload.type,
@@ -923,31 +1016,73 @@ export const financialService = {
       updatedAt: nowISO,
     };
 
-    if (isSupabaseConfigured() && supabase && isValidUUID(transactionId) && isValidUUID(tenantId)) {
-      const { error: updateError } = await supabase
-        .from('financial_transactions')
-        .update({
+    let targetTxId = transactionId;
+    if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
+      if (isValidUUID(transactionId)) {
+        const { error: updateError } = await supabase
+          .from('financial_transactions')
+          .update({
+            paid_amount: newPaidAmount,
+            balance: newBalance,
+            status: newStatus,
+            payment_date: today,
+            payment_method: payload.paymentMethod,
+            receipt_number: receipt,
+            notes: combinedNotes || null,
+            updated_at: nowISO,
+          })
+          .eq('id', transactionId)
+          .eq('tenant_id', tenantId);
+
+        if (updateError) {
+          console.error('Erro ao atualizar lançamento no Supabase:', updateError);
+          throw new Error(`Não foi possível registrar a baixa: ${updateError.message}`);
+        }
+      } else {
+        // Se o ID original não era UUID válido, inserir com novo UUID garantido no Supabase
+        const newId = generateUUID();
+        targetTxId = newId;
+        const { error: insertErr } = await supabase.from('financial_transactions').insert({
+          id: newId,
+          tenant_id: tenantId,
+          branch_id: tx.branchId && isValidUUID(tx.branchId) ? tx.branchId : null,
+          type: tx.type,
+          category: tx.category,
+          description: tx.description,
+          amount: tx.amount,
           paid_amount: newPaidAmount,
           balance: newBalance,
-          status: newStatus,
+          competence: tx.competence,
+          due_date: tx.dueDate || null,
           payment_date: today,
+          status: newStatus,
+          student_id: tx.studentId && isValidUUID(tx.studentId) ? tx.studentId : null,
+          guardian_person_id: tx.guardianPersonId && isValidUUID(tx.guardianPersonId) ? tx.guardianPersonId : null,
+          class_group_id: tx.classGroupId && isValidUUID(tx.classGroupId) ? tx.classGroupId : null,
+          quantity: tx.quantity || 1,
+          unit_price: tx.unitPrice || tx.amount,
           payment_method: payload.paymentMethod,
           receipt_number: receipt,
           notes: combinedNotes || null,
-          updated_at: nowISO,
-        })
-        .eq('id', transactionId)
-        .eq('tenant_id', tenantId);
+          created_by_user_id: tx.createdByUserId && isValidUUID(tx.createdByUserId) ? tx.createdByUserId : null,
+          created_by_name: tx.createdByUserName || payload.registeredByName,
+        });
 
-      if (updateError) {
-        console.error('Erro ao atualizar lançamento no Supabase:', updateError);
-        throw new Error(`Não foi possível registrar a baixa: ${updateError.message}`);
+        if (insertErr) {
+          console.error('Erro ao persistir lançamento no Supabase durante baixa:', insertErr);
+          throw new Error(`Não foi possível registrar a baixa: ${insertErr.message}`);
+        }
+        updatedTx.id = targetTxId;
       }
     }
 
-    const updatedList = currentTxs.some((t) => t.id === transactionId)
-      ? currentTxs.map((t) => (t.id === transactionId ? updatedTx : t))
-      : [updatedTx, ...currentTxs];
+    const updatedList = currentTxs.map((t) =>
+      t.id === transactionId || t.id === updatedTx.id ? updatedTx : t
+    );
+
+    if (!updatedList.some((t) => t.id === updatedTx.id)) {
+      updatedList.unshift(updatedTx);
+    }
 
     DataStore.saveFinancialTransactions(updatedList);
     return updatedTx;

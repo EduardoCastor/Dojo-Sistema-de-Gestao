@@ -191,6 +191,17 @@ export default function App() {
         } catch (cErr) {
           console.warn('Aviso ao sincronizar turmas/matrículas/frequência/tatamis do Supabase:', cErr);
         }
+
+        // Sincronizar mensalidades e cobranças reais da academia ativa
+        try {
+          const loadedInvoices = await financialService.fetchInvoices(currentTenantId);
+          if (isMounted && loadedInvoices && loadedInvoices.length > 0) {
+            setInvoices(loadedInvoices);
+            DataStore.saveInvoices(loadedInvoices);
+          }
+        } catch (fErr) {
+          console.warn('Aviso ao sincronizar dados financeiros do Supabase:', fErr);
+        }
       } catch (err) {
         console.warn('Erro ao sincronizar alunos do banco:', err);
       } finally {
@@ -870,6 +881,7 @@ export default function App() {
       const fresh = await financialService.fetchInvoices(currentTenantId);
       if (fresh) {
         setInvoices(fresh);
+        DataStore.saveInvoices(fresh);
       }
     } catch (err) {
       console.warn('Erro ao atualizar mensalidades:', err);

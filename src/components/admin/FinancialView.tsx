@@ -1205,15 +1205,26 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
                       <th className="py-3 px-4">Descrição</th>
                       <th className="py-3 px-3">Aluno / Turma Vinculada</th>
                       <th className="py-3 px-3">Competência</th>
-                      <th className="py-3 px-3 text-right">Valor</th>
+                      <th className="py-3 px-3 text-right">Valor Original</th>
+                      <th className="py-3 px-3 text-right">Pago / Recebido</th>
+                      <th className="py-3 px-3 text-right">Saldo Pendente</th>
                       <th className="py-3 px-3 text-center">Situação</th>
-                      <th className="py-3 px-4 text-right">Ação</th>
+                      <th className="py-3 px-4 text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {filteredTransactions.map((t) => {
                       const { person } = getStudentAndPerson(t.studentId);
                       const classObj = getClassObj(t.classGroupId);
+
+                      const origAmount = Number(t.amount);
+                      const paid = t.paidAmount !== undefined
+                        ? Number(t.paidAmount)
+                        : (t.status === 'completed' ? origAmount : 0);
+                      const pendingBal = t.balance !== undefined
+                        ? Number(t.balance)
+                        : (t.status === 'completed' ? 0 : Math.max(0, origAmount - paid));
+                      const canSettle = t.status !== 'canceled' && (pendingBal > 0 || t.status === 'pending' || t.status === 'partially_paid');
 
                       return (
                         <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
@@ -1257,9 +1268,19 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
                           <td className="py-3 px-3 font-mono text-slate-300">{t.competence}</td>
 
-                          <td className="py-3 px-3 text-right font-mono font-bold">
+                          <td className="py-3 px-3 text-right font-mono font-medium text-slate-200">
                             <span className={t.type === 'income' ? 'text-emerald-400' : 'text-red-400'}>
-                              {t.type === 'income' ? '+' : '-'}{formatCurrencyBRL(t.amount)}
+                              {t.type === 'income' ? '+' : '-'}{formatCurrencyBRL(origAmount)}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-3 text-right font-mono font-medium text-emerald-400">
+                            {formatCurrencyBRL(paid)}
+                          </td>
+
+                          <td className="py-3 px-3 text-right font-mono font-bold">
+                            <span className={pendingBal > 0 ? (t.type === 'income' ? 'text-amber-400' : 'text-red-400') : 'text-slate-500'}>
+                              {formatCurrencyBRL(pendingBal)}
                             </span>
                           </td>
 
@@ -1268,25 +1289,46 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
                               className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                                 t.status === 'completed'
                                   ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
+                                  : t.status === 'partially_paid'
+                                  ? 'bg-blue-950/60 text-blue-400 border border-blue-500/30'
                                   : t.status === 'pending'
                                   ? 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
                                   : 'bg-slate-800 text-slate-400'
                               }`}
                             >
-                              {t.status === 'completed' ? 'Concluído' : t.status === 'pending' ? 'Pendente' : 'Cancelado'}
+                              {t.status === 'completed'
+                                ? 'Quitado'
+                                : t.status === 'partially_paid'
+                                ? 'Parcial'
+                                : t.status === 'pending'
+                                ? 'Pendente'
+                                : 'Cancelado'}
                             </span>
                           </td>
 
                           <td className="py-3 px-4 text-right">
-                            {t.status !== 'canceled' && (
-                              <button
-                                onClick={() => handleCancelTransaction(t)}
-                                title="Cancelar lançamento"
-                                className="text-slate-400 hover:text-red-400 transition-colors p-1 cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
+                            <div className="flex items-center justify-end gap-1.5">
+                              {canSettle && (
+                                <button
+                                  onClick={() => handleOpenSettleTransaction(t)}
+                                  title={t.type === 'income' ? 'Registrar recebimento da receita' : 'Registrar pagamento da despesa'}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition-colors cursor-pointer shadow-sm"
+                                >
+                                  <CheckCircle className="h-3.5 w-3.5" />
+                                  <span>{t.type === 'income' ? 'Dar Baixa' : 'Registrar Pagamento'}</span>
+                                </button>
+                              )}
+
+                              {t.status !== 'canceled' && (
+                                <button
+                                  onClick={() => handleCancelTransaction(t)}
+                                  title="Cancelar lançamento"
+                                  className="text-slate-400 hover:text-red-400 transition-colors p-1 cursor-pointer rounded hover:bg-slate-800"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1408,153 +1450,198 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       {/* ============================================================== */}
       {/* MODAL DE BAIXA / REGISTRO DE PAGAMENTO                         */}
       {/* ============================================================== */}
-      {settlingTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="relative w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200 text-xs">
-            <button
-              onClick={() => setSettlingTarget(null)}
-              disabled={isSubmittingPayment}
-              className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              <X className="h-5 w-5" />
-            </button>
+      {settlingTarget && (() => {
+        const isInvoice = settlingTarget.type === 'invoice';
+        const isIncome = isInvoice || settlingTarget.data.type === 'income';
 
-            <div className="flex items-center gap-2 mb-3 text-emerald-400">
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              <h3 className="text-base font-bold text-white">
-                {settlingTarget.type === 'invoice' ? 'Registrar Pagamento de Cobrança' : 'Registrar Baixa de Lançamento'}
-              </h3>
-            </div>
+        const originalAmount = isInvoice
+          ? Number(settlingTarget.data.finalAmount || settlingTarget.data.originalAmount)
+          : Number(settlingTarget.data.amount);
 
-            <p className="text-slate-400 mb-3">
-              Informe o valor recebido e a forma de pagamento para atualizar o saldo.
-            </p>
+        const alreadyPaid = isInvoice
+          ? Number(settlingTarget.data.paidAmount || 0)
+          : (settlingTarget.data.paidAmount !== undefined
+              ? Number(settlingTarget.data.paidAmount)
+              : (settlingTarget.data.status === 'completed' ? originalAmount : 0));
 
-            <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 mb-4 space-y-1">
-              {settlingTarget.type === 'invoice' ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Aluno:</span>
-                    <span className="font-bold text-white">
-                      {getStudentAndPerson(settlingTarget.data.studentId).person?.fullName || 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Competência:</span>
-                    <span className="font-mono text-slate-300">{settlingTarget.data.competence}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Saldo Atual Devedor:</span>
-                    <span className="font-mono font-bold text-red-400">{formatCurrencyBRL(settlingTarget.data.balance)}</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Descrição:</span>
-                    <span className="font-bold text-white">{settlingTarget.data.description}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Competência:</span>
-                    <span className="font-mono text-slate-300">{settlingTarget.data.competence}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Saldo Pendente:</span>
-                    <span className="font-mono font-bold text-red-400">
-                      {formatCurrencyBRL(
-                        settlingTarget.data.balance !== undefined
-                          ? settlingTarget.data.balance
-                          : (settlingTarget.data.status === 'completed' ? 0 : Math.max(0, settlingTarget.data.amount - (settlingTarget.data.paidAmount || 0)))
-                      )}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
+        const pendingBalance = isInvoice
+          ? Number(settlingTarget.data.balance)
+          : (settlingTarget.data.balance !== undefined
+              ? Number(settlingTarget.data.balance)
+              : (settlingTarget.data.status === 'completed' ? 0 : Math.max(0, originalAmount - alreadyPaid)));
 
-            {(() => {
-              const currentBalance = settlingTarget.type === 'invoice'
-                ? settlingTarget.data.balance
-                : (settlingTarget.data.balance !== undefined
-                    ? settlingTarget.data.balance
-                    : (settlingTarget.data.status === 'completed' ? 0 : Math.max(0, settlingTarget.data.amount - (settlingTarget.data.paidAmount || 0))));
+        const description = isInvoice
+          ? `Mensalidade - ${getStudentAndPerson(settlingTarget.data.studentId).person?.fullName || 'Aluno'}`
+          : settlingTarget.data.description;
 
-              return (
-                <div className="space-y-3">
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="relative w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200 text-xs">
+              <button
+                onClick={() => setSettlingTarget(null)}
+                disabled={isSubmittingPayment}
+                className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+
+              <div className="flex items-center gap-2 mb-2 text-emerald-400">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <h3 className="text-base font-bold text-white">
+                  {isInvoice
+                    ? 'Registrar Pagamento de Mensalidade'
+                    : isIncome
+                    ? 'Registrar Recebimento de Receita'
+                    : 'Registrar Pagamento de Despesa'}
+                </h3>
+              </div>
+
+              <p className="text-slate-400 mb-4">
+                Informe os dados da baixa para confirmar a quitação total ou parcial deste lançamento.
+              </p>
+
+              {/* Detalhes conhecidos do lançamento preenchidos automaticamente */}
+              <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/70 mb-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Descrição:</span>
+                  <span className="font-semibold text-white text-right max-w-[280px] truncate">{description}</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Tipo:</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      isIncome
+                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-red-950/60 text-red-400 border border-red-500/30'
+                    }`}
+                  >
+                    {isInvoice ? 'Receita (Mensalidade)' : isIncome ? 'Receita Extra' : 'Despesa'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Competência:</span>
+                  <span className="font-mono text-slate-300">{settlingTarget.data.competence}</span>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-800/80 pt-1.5">
+                  <span className="text-slate-400">Valor Original:</span>
+                  <span className="font-mono text-slate-200 font-semibold">{formatCurrencyBRL(originalAmount)}</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Total Já Pago / Recebido:</span>
+                  <span className="font-mono text-emerald-400 font-semibold">{formatCurrencyBRL(alreadyPaid)}</span>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-800/80 pt-1.5">
+                  <span className="text-slate-300 font-semibold">Saldo Pendente:</span>
+                  <span className="font-mono font-bold text-amber-400 text-sm">
+                    {formatCurrencyBRL(pendingBalance)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Formulário de baixa */}
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Valor do Pagamento (R$)</label>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Valor da Baixa Atual (R$) *
+                    </label>
                     <input
                       type="number"
                       step="0.01"
                       min="0.01"
-                      max={currentBalance}
+                      max={pendingBalance}
                       value={settleAmount}
                       onChange={(e) => setSettleAmount(parseFloat(e.target.value) || 0)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white font-mono font-bold text-sm focus:outline-none focus:border-red-500"
                     />
-                    {settleAmount < currentBalance && (
-                      <span className="text-[11px] text-amber-400 mt-1 block">
-                        Pagamento parcial: o saldo remanescente será de {formatCurrencyBRL(currentBalance - settleAmount)}.
-                      </span>
-                    )}
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Forma de Pagamento</label>
-                    <select
-                      value={settleMethod}
-                      onChange={(e) => setSettleMethod(e.target.value as any)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
-                    >
-                      <option value="pix">PIX Instantâneo</option>
-                      <option value="cash">Dinheiro em Espécie</option>
-                      <option value="credit_card">Cartão de Crédito / Débito</option>
-                      <option value="boleto">Boleto Bancário</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Observações do Recibo (Opcional)</label>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Data Efetiva *
+                    </label>
                     <input
-                      type="text"
-                      placeholder="Ex: Pago na recepção em dinheiro..."
-                      value={settleNotes}
-                      onChange={(e) => setSettleNotes(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
+                      type="date"
+                      value={settleDate}
+                      onChange={(e) => setSettleDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:outline-none focus:border-red-500"
                     />
                   </div>
-
-                  {settleError && (
-                    <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-[11px]">
-                      {settleError}
-                    </div>
-                  )}
                 </div>
-              );
-            })()}
 
-            <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setSettlingTarget(null)}
-                disabled={isSubmittingPayment}
-                className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSettle}
-                disabled={isSubmittingPayment || settleAmount <= 0}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow cursor-pointer disabled:opacity-50"
-              >
-                <Check className="h-4 w-4" />
-                <span>{isSubmittingPayment ? 'Registrando...' : 'Confirmar Baixa'}</span>
-              </button>
+                {settleAmount < pendingBalance && (
+                  <div className="text-[11px] text-amber-400 bg-amber-950/30 border border-amber-500/20 px-3 py-1.5 rounded-lg">
+                    Baixa parcial: o saldo remanescente será de {formatCurrencyBRL(Math.max(0, pendingBalance - settleAmount))}.
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Forma de Pagamento *</label>
+                  <select
+                    value={settleMethod}
+                    onChange={(e) => setSettleMethod(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
+                  >
+                    <option value="pix">PIX Instantâneo</option>
+                    <option value="cash">Dinheiro em Espécie</option>
+                    <option value="credit_card">Cartão de Crédito / Débito</option>
+                    <option value="boleto">Boleto Bancário</option>
+                    <option value="transfer">Transferência Bancária (TED / DOC / Depósito)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Observações Opcionais</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Pagamento confirmado na recepção..."
+                    value={settleNotes}
+                    onChange={(e) => setSettleNotes(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                {settleError && (
+                  <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-[11px]">
+                    {settleError}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setSettlingTarget(null)}
+                  disabled={isSubmittingPayment}
+                  className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSettle}
+                  disabled={isSubmittingPayment || settleAmount <= 0 || settleAmount > pendingBalance}
+                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow cursor-pointer disabled:opacity-50"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>
+                    {isSubmittingPayment
+                      ? 'Registrando...'
+                      : isIncome
+                      ? 'Confirmar Baixa'
+                      : 'Confirmar Pagamento'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ============================================================== */}
       {/* MODAL DE PIX / QR CODE                                         */}

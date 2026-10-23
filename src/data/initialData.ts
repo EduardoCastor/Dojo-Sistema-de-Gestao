@@ -897,12 +897,12 @@ export const INITIAL_ATTENDANCES: AttendanceRecord[] = [
 
 export const INITIAL_INVOICES: Invoice[] = [
   {
-    id: 'inv-2026-10-lucas',
+    id: 'a1000000-0000-4000-8000-000000000001',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     studentId: 'student-lucas',
     financialGuardianId: 'person-marcos',
-    planId: 'plan-infantil',
+    planId: 'c1000000-0000-4000-8000-000000000001',
     classGroupId: 'class-judo-infantil',
     competence: '10/2026',
     issueDate: '2026-10-01',
@@ -932,12 +932,12 @@ export const INITIAL_INVOICES: Invoice[] = [
     ],
   },
   {
-    id: 'inv-2026-10-sofia',
+    id: 'a1000000-0000-4000-8000-000000000002',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     studentId: 'student-sofia',
     financialGuardianId: 'person-marcos',
-    planId: 'plan-infantil',
+    planId: 'c1000000-0000-4000-8000-000000000001',
     classGroupId: 'class-judo-infantil',
     competence: '10/2026',
     issueDate: '2026-10-01',
@@ -968,11 +968,11 @@ export const INITIAL_INVOICES: Invoice[] = [
     ],
   },
   {
-    id: 'inv-2026-10-gabriel',
+    id: 'a1000000-0000-4000-8000-000000000003',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     studentId: 'student-gabriel',
-    planId: 'plan-competicao',
+    planId: 'c1000000-0000-4000-8000-000000000004',
     classGroupId: 'class-judo-competicao',
     competence: '10/2026',
     issueDate: '2026-10-01',
@@ -999,12 +999,12 @@ export const INITIAL_INVOICES: Invoice[] = [
     ],
   },
   {
-    id: 'inv-2026-11-lucas',
+    id: 'a1000000-0000-4000-8000-000000000004',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     studentId: 'student-lucas',
     financialGuardianId: 'person-marcos',
-    planId: 'plan-infantil',
+    planId: 'c1000000-0000-4000-8000-000000000001',
     classGroupId: 'class-judo-infantil',
     competence: '11/2026',
     issueDate: '2026-10-15',
@@ -1029,7 +1029,7 @@ export const INITIAL_INVOICES: Invoice[] = [
 
 export const INITIAL_MEMBERSHIP_PLANS: MembershipPlan[] = [
   {
-    id: 'plan-infantil',
+    id: 'c1000000-0000-4000-8000-000000000001',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     name: 'Plano Infantil Kodokan (Judô)',
@@ -1041,7 +1041,7 @@ export const INITIAL_MEMBERSHIP_PLANS: MembershipPlan[] = [
     createdAt: '2026-01-01T08:00:00Z',
   },
   {
-    id: 'plan-adulto-bjj',
+    id: 'c1000000-0000-4000-8000-000000000002',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     name: 'Plano Adulto Jiu-Jitsu Brasileiro',
@@ -1053,7 +1053,7 @@ export const INITIAL_MEMBERSHIP_PLANS: MembershipPlan[] = [
     createdAt: '2026-01-01T08:00:00Z',
   },
   {
-    id: 'plan-livre',
+    id: 'c1000000-0000-4000-8000-000000000003',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     name: 'Plano Livre (Judô + BJJ Ilimitado)',
@@ -1066,7 +1066,7 @@ export const INITIAL_MEMBERSHIP_PLANS: MembershipPlan[] = [
     createdAt: '2026-01-01T08:00:00Z',
   },
   {
-    id: 'plan-competicao',
+    id: 'c1000000-0000-4000-8000-000000000004',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     name: 'Turma de Alto Rendimento / Competição',
@@ -1080,7 +1080,7 @@ export const INITIAL_MEMBERSHIP_PLANS: MembershipPlan[] = [
 
 export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
   {
-    id: 'tx-comp-1',
+    id: 'b1000000-0000-4000-8000-000000000001',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     type: 'income',
@@ -1102,7 +1102,7 @@ export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
     createdAt: '2026-10-12T10:00:00Z',
   },
   {
-    id: 'tx-kimono-1',
+    id: 'b1000000-0000-4000-8000-000000000002',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     type: 'income',
@@ -1125,7 +1125,7 @@ export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
     createdAt: '2026-10-05T14:20:00Z',
   },
   {
-    id: 'tx-exam-1',
+    id: 'b1000000-0000-4000-8000-000000000003',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     type: 'income',
@@ -1146,7 +1146,7 @@ export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
     createdAt: '2026-10-14T09:00:00Z',
   },
   {
-    id: 'tx-desp-tatami-pend',
+    id: 'b1000000-0000-4000-8000-000000000004',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     type: 'expense',
@@ -1162,7 +1162,7 @@ export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
     createdAt: '2026-10-18T10:00:00Z',
   },
   {
-    id: 'tx-desp-tatami',
+    id: 'b1000000-0000-4000-8000-000000000005',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     type: 'expense',
@@ -1180,7 +1180,7 @@ export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
     createdAt: '2026-10-04T11:15:00Z',
   },
   {
-    id: 'tx-desp-fed',
+    id: 'b1000000-0000-4000-8000-000000000006',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
     type: 'expense',
@@ -1203,7 +1203,7 @@ export const INITIAL_PAYMENT_REMINDERS: PaymentReminder[] = [
   {
     id: 'rem-1',
     tenantId: 'tenant-kodokan',
-    invoiceId: 'inv-2026-10-gabriel',
+    invoiceId: 'a1000000-0000-4000-8000-000000000003',
     recipientEmail: 'gabriel.aluno@email.com',
     recipientName: 'Gabriel Santos Ferreira',
     recipientType: 'student',
@@ -1409,7 +1409,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
     userName: 'Roberto Alves',
     action: 'Baixa de Mensalidade',
     entity: 'Invoice',
-    entityId: 'inv-2026-10-lucas',
+    entityId: 'a1000000-0000-4000-8000-000000000001',
     timestamp: '2026-10-08T14:32:10Z',
     details: 'Confirmação de recebimento no valor de R$ 220,00 via PIX.',
   },
