@@ -26,6 +26,7 @@ import {
   Scale,
   Trash2,
   History,
+  Info,
   TrendingUp,
 } from 'lucide-react';
 import {
