@@ -367,7 +367,9 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       try {
         const plans = await financialService.fetchPlans(tenantId, branchId);
         if (isMounted) {
-          setAvailablePlans(plans.filter((p) => p.active));
+          const currentPlanId = studentToEdit?.planId;
+          const filtered = plans.filter((p) => p.active || (currentPlanId && p.id === currentPlanId));
+          setAvailablePlans(filtered);
         }
       } catch (err) {
         console.warn('Erro ao carregar planos de mensalidade:', err);
@@ -383,7 +385,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, branchId]);
+  }, [isOpen, tenantId, branchId, studentToEdit]);
 
   // 2. Carregar Modalidades Reais do Supabase vinculadas à academia ativa (tenant_id)
   useEffect(() => {
@@ -1189,7 +1191,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         email,
         city,
         monthlyFee: Number(monthlyFee) || studentToEdit.monthlyFee,
-        planId: selectedPlanId || undefined,
+        planId: selectedPlanId ? selectedPlanId : null,
         effectiveCompetence: isPlanChanged ? effectiveCompetence : undefined,
         status: studentStatus,
         martialArtId: selectedArtId,
@@ -1318,7 +1320,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       email,
       city,
       monthlyFee: Number(monthlyFee) || 220,
-      planId: selectedPlanId || undefined,
+      planId: selectedPlanId ? selectedPlanId : null,
       martialArtId: selectedArtId,
       beltRankId: selectedBeltId,
       selectedArt: chosenArt,
@@ -1650,7 +1652,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-slate-300 font-medium flex items-center gap-1">
                     <CreditCard className="h-3 w-3 text-red-400" />
-                    <span>Plano de Mensalidade</span>
+                    <span>Plano de mensalidade</span>
                     {isLoadingPlans && <Loader2 className="inline h-2.5 w-2.5 animate-spin text-red-400 ml-1" />}
                   </label>
                 </div>
@@ -1658,12 +1660,12 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                   value={selectedPlanId}
                   onChange={(e) => handlePlanChange(e.target.value)}
                   disabled={isLoadingPlans}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none disabled:opacity-50"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none disabled:opacity-50 cursor-pointer"
                 >
                   <option value="">Sem plano vinculado (Personalizado)</option>
                   {availablePlans.map((plan) => (
                     <option key={plan.id} value={plan.id}>
-                      {plan.name} — {formatCurrencyBRL(plan.amount)}/mês{plan.discountPercentage ? ` (${plan.discountPercentage}% desc.)` : ''}
+                      {plan.name} — {formatCurrencyBRL(plan.amount)}/mês{!plan.active ? ' (Inativo)' : ''}{plan.discountPercentage ? ` (${plan.discountPercentage}% desc.)` : ''}
                     </option>
                   ))}
                 </select>

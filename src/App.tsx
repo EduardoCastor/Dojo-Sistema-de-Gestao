@@ -68,7 +68,7 @@ import { studentService, CreateStudentPayload, UpdateStudentPayload, isValidUUID
 import { classService } from './services/classService';
 import { attendanceService } from './services/attendanceService';
 import { tatamiService } from './services/tatamiService';
-import { financialService } from './services/financialService';
+import { financialService, getCurrentCompetence } from './services/financialService';
 
 export default function App() {
   // App view navigation
@@ -604,6 +604,21 @@ export default function App() {
     const updatedGuardians = relationship ? [...guardians, relationship] : guardians;
 
     // Generate initial invoice for this student
+    const membershipPlans = DataStore.getMembershipPlans(currentTenantId);
+    const selectedPlanForNew = newStudent.planId
+      ? membershipPlans.find((p) => p.id === newStudent.planId)
+      : null;
+    let originalAmount = newStudent.monthlyFee;
+    let discountAmount = 0;
+    let discountDesc: string | undefined = undefined;
+    if (selectedPlanForNew) {
+      originalAmount = selectedPlanForNew.amount;
+      if (selectedPlanForNew.discountPercentage && selectedPlanForNew.discountPercentage > 0) {
+        discountAmount = Math.round((originalAmount * (selectedPlanForNew.discountPercentage / 100)) * 100) / 100;
+        discountDesc = selectedPlanForNew.discountDescription || `${selectedPlanForNew.discountPercentage}% desconto do plano`;
+      }
+    }
+
     const newInvoice: Invoice = {
       id: `inv-${Date.now()}`,
       tenantId: currentTenantId,
@@ -611,11 +626,12 @@ export default function App() {
       studentId: newStudent.id,
       financialGuardianId: guardianPerson?.id,
       planId: newStudent.planId,
-      competence: '10/2026',
+      competence: getCurrentCompetence(),
       issueDate: new Date().toISOString().split('T')[0],
-      dueDate: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(activeTenant.settings.defaultDueDay).padStart(2, '0')}`,
-      originalAmount: newStudent.monthlyFee,
-      discountAmount: 0,
+      dueDate: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(Math.min(28, Math.max(1, selectedPlanForNew?.dueDay || activeTenant.settings.defaultDueDay || 10))).padStart(2, '0')}`,
+      originalAmount: originalAmount,
+      discountAmount: discountAmount,
+      discountDescription: discountDesc,
       penaltyAndInterestAmount: 0,
       finalAmount: newStudent.monthlyFee,
       paidAmount: 0,
@@ -713,11 +729,15 @@ export default function App() {
         DataStore.saveStudents(students.map((s) => (s.id === result.student.id ? result.student : s)));
 
         // Se houve alteração de plano, sincronizar faturas futuras e proteger histórico
-        if (payloadDetails.planId !== undefined && (!editingStudent || payloadDetails.planId !== editingStudent.planId)) {
+        const oldPlanId = editingStudent?.planId || null;
+        const newPlanId = payloadDetails.planId || null;
+        const isPlanChanged = oldPlanId !== newPlanId;
+
+        if (isPlanChanged) {
           try {
             const planRes = await financialService.updateStudentPlanAndFutureInvoices({
               studentId: result.student.id,
-              newPlanId: payloadDetails.planId || undefined,
+              newPlanId: newPlanId,
               tenantId: activeTenantId,
               effectiveCompetence: payloadDetails.effectiveCompetence,
               newMonthlyFee: payloadDetails.monthlyFee,
@@ -728,6 +748,7 @@ export default function App() {
             }
           } catch (planErr) {
             console.error('Falha ao atualizar mensalidades futuras no Supabase:', planErr);
+            throw planErr;
           }
         }
 
@@ -742,6 +763,30 @@ export default function App() {
     }
 
     // 2. Fallback localStorage (modo demonstração local)
+    const oldPlanId = editingStudent?.planId || null;
+    const newPlanId = payloadDetails?.planId || null;
+    const isPlanChanged = oldPlanId !== newPlanId;
+
+    // Se houve alteração de plano no modo local, sincronizar faturas futuras e proteger histórico
+    if (isPlanChanged && payloadDetails) {
+      try {
+        const planRes = await financialService.updateStudentPlanAndFutureInvoices({
+          studentId: updatedStudent.id,
+          newPlanId: newPlanId,
+          tenantId: currentTenantId,
+          effectiveCompetence: payloadDetails.effectiveCompetence,
+          newMonthlyFee: payloadDetails.monthlyFee,
+          currentUserName: currentUser.name,
+        });
+        if (planRes?.updatedInvoices) {
+          setInvoices(planRes.updatedInvoices);
+        }
+      } catch (planErr) {
+        console.error('Falha ao atualizar mensalidades futuras locais:', planErr);
+        throw planErr;
+      }
+    }
+
     const updatedStudentsList = students.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
     const updatedPersonsList = persons.map((p) => {
       if (p.id === updatedPerson.id) return updatedPerson;
@@ -764,25 +809,6 @@ export default function App() {
     setStudents(updatedStudentsList);
     setPersons(updatedPersonsList);
     setGuardians(updatedGuardiansList);
-
-    // Se houve alteração de plano no modo local, sincronizar faturas futuras e proteger histórico
-    if (payloadDetails?.planId !== undefined && (!editingStudent || payloadDetails.planId !== editingStudent.planId)) {
-      try {
-        const planRes = await financialService.updateStudentPlanAndFutureInvoices({
-          studentId: updatedStudent.id,
-          newPlanId: payloadDetails.planId || undefined,
-          tenantId: currentTenantId,
-          effectiveCompetence: payloadDetails.effectiveCompetence,
-          newMonthlyFee: payloadDetails.monthlyFee,
-          currentUserName: currentUser.name,
-        });
-        if (planRes?.updatedInvoices) {
-          setInvoices(planRes.updatedInvoices);
-        }
-      } catch (planErr) {
-        console.error('Falha ao atualizar mensalidades futuras locais:', planErr);
-      }
-    }
 
     DataStore.logAudit(
       currentTenantId,
@@ -1592,7 +1618,7 @@ export default function App() {
           setEditingStudent(null);
         }}
         tenantId={currentTenantId}
-        branchId={currentBranchId}
+        branchId={editingStudent?.branchId || currentBranchId}
         belts={beltRanks}
         martialArts={martialArts}
         studentToEdit={editingStudent}

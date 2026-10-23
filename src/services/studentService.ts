@@ -25,7 +25,7 @@ export interface CreateStudentPayload {
   email?: string;
   city?: string;
   monthlyFee: number;
-  planId?: string;
+  planId?: string | null;
   martialArtId: string;
   beltRankId: string;
   selectedBelt?: BeltRank;
@@ -56,7 +56,7 @@ export interface UpdateStudentPayload {
   email?: string;
   city?: string;
   monthlyFee: number;
-  planId?: string;
+  planId?: string | null;
   effectiveCompetence?: string;
   status: 'active' | 'inactive' | 'suspended' | 'dropped';
   martialArtId: string;
@@ -1815,7 +1815,7 @@ export const studentService = {
             },
           ],
           monthlyFee: payload.monthlyFee,
-          planId: payload.planId,
+          planId: payload.planId || undefined,
         };
 
         let createdGuardianPerson: Person | undefined = undefined;
@@ -2079,7 +2079,7 @@ export const studentService = {
         },
       ],
       monthlyFee: payload.monthlyFee,
-      planId: payload.planId,
+      planId: payload.planId || undefined,
     };
 
     const resultPerson: Person = {

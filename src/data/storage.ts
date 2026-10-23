@@ -146,7 +146,10 @@ export class DataStore {
   }
 
   static saveStudents(students: Student[]): void {
-    save('students', students);
+    const all = load('students', INITIAL_STUDENTS);
+    const updatedTenantIds = new Set(students.map(s => s.tenantId));
+    const others = all.filter(s => !updatedTenantIds.has(s.tenantId));
+    save('students', [...students, ...others]);
   }
 
   static getPhysicalAssessments(tenantId: string): PhysicalAssessment[] {
@@ -230,13 +233,15 @@ export class DataStore {
   }
 
   static saveInvoices(invoices: Invoice[]): void {
-    save('invoices', invoices);
+    const all = load('invoices', INITIAL_INVOICES);
+    const updatedTenantIds = new Set(invoices.map(i => i.tenantId));
+    const others = all.filter(i => !updatedTenantIds.has(i.tenantId));
+    save('invoices', [...invoices, ...others]);
   }
 
   static getMembershipPlans(tenantId: string): MembershipPlan[] {
     const all = load('membership_plans', INITIAL_MEMBERSHIP_PLANS);
-    const filtered = all.filter(p => p.tenantId === tenantId);
-    return filtered.length > 0 ? filtered : all.filter(p => p.tenantId === 'tenant-kodokan');
+    return all.filter(p => p.tenantId === tenantId);
   }
 
   static saveMembershipPlans(plans: MembershipPlan[]): void {
@@ -245,8 +250,7 @@ export class DataStore {
 
   static getFinancialTransactions(tenantId: string): FinancialTransaction[] {
     const all = load('financial_transactions', INITIAL_FINANCIAL_TRANSACTIONS);
-    const filtered = all.filter(t => t.tenantId === tenantId);
-    return filtered.length > 0 ? filtered : all.filter(t => t.tenantId === 'tenant-kodokan');
+    return all.filter(t => t.tenantId === tenantId);
   }
 
   static saveFinancialTransactions(txs: FinancialTransaction[]): void {

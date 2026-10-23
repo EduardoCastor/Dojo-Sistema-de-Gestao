@@ -54,6 +54,7 @@ DECLARE
   v_old_fee numeric;
   v_plan_name text := NULL;
   v_plan_amount numeric := NULL;
+  v_plan_due_day integer := NULL;
   v_plan_discount_pct numeric := 0;
   v_plan_discount_desc text := NULL;
   v_final_amount numeric := 0;
@@ -88,8 +89,8 @@ BEGIN
 
   -- 4. Carregar detalhes do novo plano (se informado)
   IF p_new_plan_id IS NOT NULL THEN
-    SELECT name, amount, COALESCE(discount_percentage, 0), discount_description
-    INTO v_plan_name, v_plan_amount, v_plan_discount_pct, v_plan_discount_desc
+    SELECT name, amount, due_day, COALESCE(discount_percentage, 0), discount_description
+    INTO v_plan_name, v_plan_amount, v_plan_due_day, v_plan_discount_pct, v_plan_discount_desc
     FROM public.membership_plans
     WHERE id = p_new_plan_id AND tenant_id = p_tenant_id AND active = true;
 
@@ -135,6 +136,21 @@ BEGIN
       discount_description = v_plan_discount_desc,
       final_amount = v_final_amount,
       balance = v_final_amount,
+      due_date = CASE 
+        WHEN v_plan_due_day IS NOT NULL 
+             AND competence ~ '^[0-1]?[0-9]/[0-9]{4}$' 
+             AND make_date(
+                   split_part(competence, '/', 2)::integer, 
+                   split_part(competence, '/', 1)::integer, 
+                   LEAST(28, GREATEST(1, v_plan_due_day))
+                 ) >= CURRENT_DATE THEN
+          make_date(
+            split_part(competence, '/', 2)::integer, 
+            split_part(competence, '/', 1)::integer, 
+            LEAST(28, GREATEST(1, v_plan_due_day))
+          )
+        ELSE due_date
+      END,
       updated_at = now()
     WHERE tenant_id = p_tenant_id
       AND student_id = p_student_id

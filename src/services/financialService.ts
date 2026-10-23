@@ -1388,10 +1388,22 @@ export const financialService = {
           });
 
           for (const inv of toUpdate) {
+            let newDueDate = inv.due_date;
+            if (selectedPlan && selectedPlan.dueDay) {
+              const [compM, compY] = (inv.competence || '').split('/');
+              if (compM && compY) {
+                const dayStr = String(Math.min(28, Math.max(1, selectedPlan.dueDay))).padStart(2, '0');
+                const candidateDate = `${compY}-${compM.padStart(2, '0')}-${dayStr}`;
+                if (candidateDate >= today) {
+                  newDueDate = candidateDate;
+                }
+              }
+            }
             await supabase
               .from('invoices')
               .update({
                 plan_id: selectedPlan && isValidUUID(selectedPlan.id) ? selectedPlan.id : null,
+                due_date: newDueDate,
                 original_amount: planAmount,
                 discount_amount: discountAmount,
                 discount_description: discountDescription || null,
@@ -1424,9 +1436,21 @@ export const financialService = {
       if (isTargetStudent && isPending && isZeroPaid && isFullBalance && isNotOverdue && isFutureComp) {
         localUpdatedCount++;
         const oldAmount = inv.finalAmount;
+        let newDueDate = inv.dueDate;
+        if (selectedPlan && selectedPlan.dueDay) {
+          const [compM, compY] = (inv.competence || '').split('/');
+          if (compM && compY) {
+            const dayStr = String(Math.min(28, Math.max(1, selectedPlan.dueDay))).padStart(2, '0');
+            const candidateDate = `${compY}-${compM.padStart(2, '0')}-${dayStr}`;
+            if (candidateDate >= today) {
+              newDueDate = candidateDate;
+            }
+          }
+        }
         return {
           ...inv,
           planId: selectedPlan ? selectedPlan.id : undefined,
+          dueDate: newDueDate,
           originalAmount: planAmount,
           discountAmount,
           discountDescription,
