@@ -130,12 +130,19 @@ export interface PhysicalAssessment {
   id: string;
   tenantId: string;
   studentId: string;
-  date: string;
+  date: string; // YYYY-MM-DD
   weightKg: number;
   heightCm: number;
   bmi: number;
   evaluatorName: string;
+  ageYearsAtMeasurement?: number;
+  ageMonthsAtMeasurement?: number;
+  classification?: string;
+  referenceStandard?: string;
+  recordedByUserId?: string;
   notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface HealthRecord {

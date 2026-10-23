@@ -22,6 +22,7 @@ import {
   BeltRank,
   MartialArt,
   Tatami,
+  PhysicalAssessment,
 } from './types';
 
 // Layouts
@@ -69,6 +70,7 @@ import { classService } from './services/classService';
 import { attendanceService } from './services/attendanceService';
 import { tatamiService } from './services/tatamiService';
 import { financialService, getCurrentCompetence } from './services/financialService';
+import { assessmentService } from './services/assessmentService';
 
 export default function App() {
   // App view navigation
@@ -192,6 +194,17 @@ export default function App() {
           console.warn('Aviso ao sincronizar turmas/matrículas/frequência/tatamis do Supabase:', cErr);
         }
 
+        // Sincronizar avaliações antropométricas reais da academia ativa
+        try {
+          const loadedAssessments = await assessmentService.fetchAssessments(currentTenantId);
+          if (isMounted && loadedAssessments && loadedAssessments.length > 0) {
+            setPhysicalAssessments(loadedAssessments);
+            DataStore.savePhysicalAssessments(loadedAssessments);
+          }
+        } catch (aErr) {
+          console.warn('Aviso ao sincronizar avaliações do Supabase:', aErr);
+        }
+
         // Sincronizar mensalidades e cobranças reais da academia ativa
         try {
           const loadedInvoices = await financialService.fetchInvoices(currentTenantId);
@@ -224,10 +237,11 @@ export default function App() {
     }
     setIsLoadingStudents(true);
     try {
-      const [result, loadedClasses, loadedEnrollments] = await Promise.all([
+      const [result, loadedClasses, loadedEnrollments, loadedAssessments] = await Promise.all([
         studentService.fetchStudentsWithDetails(currentTenantId),
         classService.fetchClasses(currentTenantId),
         classService.fetchEnrollments(currentTenantId),
+        assessmentService.fetchAssessments(currentTenantId),
       ]);
       if (result) {
         setStudents(result.students);
@@ -245,6 +259,10 @@ export default function App() {
       }
       if (loadedClasses && loadedClasses.length > 0) setClasses(loadedClasses);
       if (loadedEnrollments) setEnrollments(loadedEnrollments);
+      if (loadedAssessments && loadedAssessments.length > 0) {
+        setPhysicalAssessments(loadedAssessments);
+        DataStore.savePhysicalAssessments(loadedAssessments);
+      }
     } catch (err) {
       console.warn('Erro ao atualizar dados do banco:', err);
     } finally {
@@ -832,6 +850,25 @@ export default function App() {
     });
   };
 
+  const handleSaveAssessment = (saved: PhysicalAssessment) => {
+    setPhysicalAssessments((prev) => {
+      const exists = prev.some((a) => a.id === saved.id);
+      const next = exists
+        ? prev.map((a) => (a.id === saved.id ? saved : a))
+        : [saved, ...prev];
+      DataStore.savePhysicalAssessments(next);
+      return next;
+    });
+  };
+
+  const handleDeleteAssessment = (id: string) => {
+    setPhysicalAssessments((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      DataStore.savePhysicalAssessments(next);
+      return next;
+    });
+  };
+
   const handleResetAcademyData = async () => {
     try {
       setIsLoadingStudents(true);
@@ -1315,10 +1352,13 @@ export default function App() {
               enrollments={enrollments}
               isLoading={isLoadingStudents}
               tenantId={currentTenantId}
+              currentUser={currentUser}
               onOpenCreateStudent={handleOpenCreateStudent}
               onEditStudent={handleOpenEditStudent}
               onUpdatePerson={handleUpdatePerson}
               onResetData={handleResetAcademyData}
+              onSaveAssessment={handleSaveAssessment}
+              onDeleteAssessment={handleDeleteAssessment}
             />
           )}
 

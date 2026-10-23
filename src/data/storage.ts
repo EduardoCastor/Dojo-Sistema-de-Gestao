@@ -157,8 +157,15 @@ export class DataStore {
     return all.filter(a => a.tenantId === tenantId);
   }
 
+  static getAllPhysicalAssessments(): PhysicalAssessment[] {
+    return load('physical_assessments', INITIAL_PHYSICAL_ASSESSMENTS);
+  }
+
   static savePhysicalAssessments(assessments: PhysicalAssessment[]): void {
-    save('physical_assessments', assessments);
+    const all = load('physical_assessments', INITIAL_PHYSICAL_ASSESSMENTS);
+    const updatedTenantIds = new Set(assessments.map(a => a.tenantId));
+    const others = all.filter(a => !updatedTenantIds.has(a.tenantId));
+    save('physical_assessments', [...assessments, ...others]);
   }
 
   static getHealthRecords(tenantId: string): HealthRecord[] {

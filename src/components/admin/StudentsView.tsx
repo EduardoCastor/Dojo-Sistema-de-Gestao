@@ -23,6 +23,10 @@ import {
   Loader2,
   CheckCircle2,
   RotateCcw,
+  Scale,
+  Trash2,
+  History,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Student,
@@ -34,6 +38,7 @@ import {
   ClassGroup,
   Enrollment,
   MembershipPlan,
+  User as AppUser,
 } from '../../types';
 import {
   formatDateBR,
@@ -44,9 +49,17 @@ import {
   formatCurrencyBRL,
 } from '../../utils/formatters';
 import { validateCPF, cleanCPF } from '../../utils/cpfValidator';
+import {
+  calculateExactAge,
+  classifyBmi,
+  getClassificationBadgeColor,
+} from '../../utils/whoBmiClassification';
 import { studentService } from '../../services/studentService';
 import { financialService } from '../../services/financialService';
+import { assessmentService } from '../../services/assessmentService';
 import { DataStore } from '../../data/storage';
+import { BmiEvolutionChart } from './BmiEvolutionChart';
+import { AssessmentFormModal } from './AssessmentFormModal';
 
 interface StudentsViewProps {
   students: Student[];
@@ -59,10 +72,13 @@ interface StudentsViewProps {
   enrollments: Enrollment[];
   isLoading?: boolean;
   tenantId?: string;
+  currentUser?: AppUser;
   onOpenCreateStudent: () => void;
   onEditStudent: (student: Student) => void;
   onUpdatePerson?: (updatedPerson: Person) => void;
   onResetData?: () => void;
+  onSaveAssessment?: (saved: PhysicalAssessment) => void;
+  onDeleteAssessment?: (assessmentId: string) => void;
 }
 
 export const StudentsView: React.FC<StudentsViewProps> = ({
@@ -76,10 +92,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   enrollments,
   isLoading,
   tenantId,
+  currentUser,
   onOpenCreateStudent,
   onEditStudent,
   onUpdatePerson,
   onResetData,
+  onSaveAssessment,
+  onDeleteAssessment,
 }) => {
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -88,6 +107,14 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [profileTab, setProfileTab] = useState<'id' | 'guardians' | 'anthropometry' | 'health' | 'ranks' | 'classes'>('id');
+
+  // Estados para o Módulo de Antropometria e IMC
+  const [isAssessmentModalOpen, setIsAssessmentModalOpen] = useState(false);
+  const [assessmentToEdit, setAssessmentToEdit] = useState<PhysicalAssessment | null>(null);
+  const [assessmentToDelete, setAssessmentToDelete] = useState<PhysicalAssessment | null>(null);
+  const [isDeletingAssessment, setIsDeletingAssessment] = useState(false);
+  const [assessmentSuccessMsg, setAssessmentSuccessMsg] = useState<string | null>(null);
+  const [assessmentErrorMsg, setAssessmentErrorMsg] = useState<string | null>(null);
 
   // Planos Financeiros para exibição na lista e no perfil
   const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>(() =>
@@ -941,67 +968,422 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </div>
               )}
 
-              {/* TAB 3: ANTROPOMETRIA & IMC */}
+              {/* TAB 3: ANTROPOMETRIA E IMC */}
               {profileTab === 'anthropometry' && (
-                <div className="space-y-4">
-                  {latestAssessment ? (
-                    <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/60 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase">Peso Atual</div>
-                        <div className="text-lg font-bold text-white font-mono tabular-nums">{latestAssessment.weightKg} kg</div>
+                <div className="space-y-5">
+                  {/* Cabeçalho da Seção */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/70 p-4 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-red-950/80 border border-red-500/30 text-red-400">
+                        <Scale className="h-5 w-5" />
                       </div>
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase">Altura</div>
-                        <div className="text-lg font-bold text-white font-mono tabular-nums">{latestAssessment.heightCm} cm</div>
+                      <div>
+                        <h3 className="text-base font-bold text-white tracking-tight">Antropometria e IMC</h3>
+                        <p className="text-xs text-slate-400">
+                          Acompanhamento de peso, estatura, cálculo automático de IMC e classificação segundo referências da OMS.
+                        </p>
                       </div>
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase">IMC Calculado</div>
-                        <div className="text-lg font-bold text-emerald-400 font-mono tabular-nums">{latestAssessment.bmi}</div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssessmentToEdit(null);
+                        setIsAssessmentModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-semibold text-xs transition-colors shadow-lg shadow-red-950/50 cursor-pointer self-start sm:self-auto"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Registrar medição</span>
+                    </button>
+                  </div>
+
+                  {/* Alertas de sucesso e erro */}
+                  {assessmentSuccessMsg && (
+                    <div className="p-3 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in duration-200">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span>{assessmentSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {assessmentErrorMsg && (
+                    <div className="p-3 rounded-lg bg-red-950/80 border border-red-500/50 text-red-200 text-xs flex items-center gap-2 animate-in fade-in duration-200">
+                      <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+                      <span>{assessmentErrorMsg}</span>
+                    </div>
+                  )}
+
+                  {/* Cartões de Indicadores Principais */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {/* 1. Idade Atual */}
+                    <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        Idade Atual
                       </div>
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase">Classificação</div>
-                        <div className="text-xs font-semibold text-slate-200 mt-1">
-                          {calculateBMI(latestAssessment.weightKg, latestAssessment.heightCm).classification}
+                      <div className="my-1.5">
+                        <div className="text-base sm:text-lg font-bold text-white font-mono leading-tight">
+                          {activePerson.birthDate ? calculateExactAge(activePerson.birthDate).formatted : 'N/I'}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {activePerson.birthDate ? formatDateBR(activePerson.birthDate) : 'Sem data nasc.'}
+                      </div>
+                    </div>
+
+                    {/* 2. Data da Última Medição */}
+                    <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        Última Medição
+                      </div>
+                      <div className="my-1.5">
+                        <div className="text-base sm:text-lg font-bold text-white font-mono leading-tight">
+                          {latestAssessment ? formatDateBR(latestAssessment.date) : 'Nenhuma'}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate" title={latestAssessment?.evaluatorName || 'Aguardando registro'}>
+                        {latestAssessment?.evaluatorName || 'Sem histórico'}
+                      </div>
+                    </div>
+
+                    {/* 3. Última Altura */}
+                    <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        Última Altura
+                      </div>
+                      <div className="my-1.5">
+                        <div className="text-base sm:text-lg font-bold text-white font-mono leading-tight">
+                          {latestAssessment ? `${latestAssessment.heightCm} cm` : '-'}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {latestAssessment ? `${(latestAssessment.heightCm / 100).toFixed(2)} m` : 'Estatura em metros'}
+                      </div>
+                    </div>
+
+                    {/* 4. Último Peso */}
+                    <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        Último Peso
+                      </div>
+                      <div className="my-1.5">
+                        <div className="text-base sm:text-lg font-bold text-white font-mono leading-tight">
+                          {latestAssessment ? `${latestAssessment.weightKg} kg` : '-'}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {latestAssessment ? 'Massa corporal' : 'Aferição pendente'}
+                      </div>
+                    </div>
+
+                    {/* 5. IMC Atual */}
+                    <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        IMC Atual
+                      </div>
+                      <div className="my-1.5">
+                        <div className="text-base sm:text-lg font-bold text-emerald-400 font-mono leading-tight">
+                          {latestAssessment ? `${latestAssessment.bmi}` : '-'}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {latestAssessment ? 'kg/m²' : 'Fórmula: p / (alt)²'}
+                      </div>
+                    </div>
+
+                    {/* 6. Classificação do IMC */}
+                    <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        Classificação
+                      </div>
+                      <div className="my-1.5">
+                        {latestAssessment ? (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${getClassificationBadgeColor(
+                              latestAssessment.classification ||
+                                classifyBmi(
+                                  latestAssessment.bmi,
+                                  activePerson.birthDate,
+                                  activePerson.gender === 'female' ? 'female' : 'male',
+                                  latestAssessment.date
+                                ).classification
+                            )}`}
+                          >
+                            {latestAssessment.classification ||
+                              classifyBmi(
+                                latestAssessment.bmi,
+                                activePerson.birthDate,
+                                activePerson.gender === 'female' ? 'female' : 'male',
+                                latestAssessment.date
+                              ).classification}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500 italic">Pendente</span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {latestAssessment?.referenceStandard === 'who_growth_reference'
+                          ? 'Padrão OMS 2007'
+                          : latestAssessment?.referenceStandard === 'who_child_growth_standards'
+                          ? 'Padrão OMS 2006'
+                          : latestAssessment
+                          ? 'Padrão Adulto OMS'
+                          : 'Sem medição'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Gráfico de Evolução do IMC */}
+                  <BmiEvolutionChart
+                    assessments={activeAssessments}
+                    studentBirthDate={activePerson.birthDate}
+                    onOpenNewMeasurement={() => {
+                      setAssessmentToEdit(null);
+                      setIsAssessmentModalOpen(true);
+                    }}
+                  />
+
+                  {/* Histórico de Medições */}
+                  <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/60 shadow-lg">
+                    <div className="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <History className="h-4 w-4 text-red-400" />
+                        <h4 className="font-bold text-slate-200 text-xs">
+                          Histórico das Medições ({activeAssessments.length})
+                        </h4>
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        Ordem cronológica decrescente
+                      </span>
+                    </div>
+
+                    {activeAssessments.length === 0 ? (
+                      <div className="p-8 text-center space-y-2">
+                        <p className="text-slate-400 text-xs">
+                          Nenhuma medição antropométrica registrada para este aluno.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAssessmentToEdit(null);
+                            setIsAssessmentModalOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow transition-colors cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Registrar medição agora</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-900/90 text-slate-400 text-[10px] uppercase font-semibold border-b border-slate-800">
+                            <tr>
+                              <th className="py-2.5 px-3.5">Data</th>
+                              <th className="py-2.5 px-3">Idade na Medição</th>
+                              <th className="py-2.5 px-3">Altura</th>
+                              <th className="py-2.5 px-3">Peso</th>
+                              <th className="py-2.5 px-3">IMC</th>
+                              <th className="py-2.5 px-3">Classificação do IMC</th>
+                              <th className="py-2.5 px-3">Avaliador</th>
+                              <th className="py-2.5 px-3">Observações</th>
+                              <th className="py-2.5 px-3 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {activeAssessments.map((a) => {
+                              const ageText =
+                                a.ageYearsAtMeasurement != null
+                                  ? `${a.ageYearsAtMeasurement}a ${
+                                      a.ageMonthsAtMeasurement != null ? `${a.ageMonthsAtMeasurement}m` : ''
+                                    }`
+                                  : activePerson.birthDate
+                                  ? calculateExactAge(activePerson.birthDate, a.date).formatted
+                                  : '-';
+
+                              const effectiveClassification =
+                                a.classification ||
+                                classifyBmi(
+                                  a.bmi,
+                                  activePerson.birthDate,
+                                  activePerson.gender === 'female' ? 'female' : 'male',
+                                  a.date
+                                ).classification;
+
+                              return (
+                                <tr
+                                  key={a.id}
+                                  className="hover:bg-slate-900/50 transition-colors"
+                                >
+                                  <td className="py-2.5 px-3.5 font-mono font-medium text-slate-200 whitespace-nowrap">
+                                    {formatDateBR(a.date)}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                                    {ageText}
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono text-slate-200 whitespace-nowrap">
+                                    {a.heightCm} cm{' '}
+                                    <span className="text-slate-500 text-[10px]">
+                                      ({(a.heightCm / 100).toFixed(2)} m)
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono font-bold text-white whitespace-nowrap">
+                                    {a.weightKg} kg
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono font-bold text-emerald-400 whitespace-nowrap">
+                                    {a.bmi} <span className="text-[10px] text-slate-500 font-normal">kg/m²</span>
+                                  </td>
+                                  <td className="py-2.5 px-3 whitespace-nowrap">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${getClassificationBadgeColor(
+                                        effectiveClassification
+                                      )}`}
+                                    >
+                                      {effectiveClassification}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-300 max-w-[120px] truncate" title={a.evaluatorName}>
+                                    {a.evaluatorName || '-'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-400 max-w-[160px] truncate" title={a.notes || ''}>
+                                    {a.notes || '-'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setAssessmentToEdit(a);
+                                          setIsAssessmentModalOpen(true);
+                                        }}
+                                        title="Editar medição"
+                                        className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                                      >
+                                        <Edit className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setAssessmentToDelete(a)}
+                                        title="Excluir medição"
+                                        className="p-1.5 rounded-md bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-200 border border-red-500/30 transition-colors cursor-pointer"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Aviso informativo obrigatório */}
+                  <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex items-start gap-2.5">
+                    <Info className="h-4 w-4 text-sky-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-slate-200">
+                        O IMC é um indicador de triagem e não substitui uma avaliação profissional de saúde.
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        A classificação utiliza os padrões de curvas de crescimento infantil e adolescente da Organização Mundial da Saúde (OMS 2006/2007) para alunos de 0 a 19 anos e os pontos de corte clássicos de adultos para 20 anos ou mais. Categorias esportivas de peso e federações de lutas operam sob seus próprios regulamentos.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Modal de Confirmação de Exclusão */}
+                  {assessmentToDelete && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                      <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+                        <div className="flex items-center gap-3 text-red-400">
+                          <div className="p-2 rounded-lg bg-red-950/80 border border-red-500/30">
+                            <Trash2 className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-white text-sm">Excluir Medição</h4>
+                            <p className="text-xs text-slate-400">Esta ação não pode ser desfeita.</p>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          Deseja realmente excluir a medição de{' '}
+                          <strong className="text-white font-mono">{formatDateBR(assessmentToDelete.date)}</strong>{' '}
+                          com peso de <strong className="text-white font-mono">{assessmentToDelete.weightKg} kg</strong> e altura de{' '}
+                          <strong className="text-white font-mono">{assessmentToDelete.heightCm} cm</strong>? O registro será permanentemente removido do histórico do aluno.
+                        </p>
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                          <button
+                            type="button"
+                            disabled={isDeletingAssessment}
+                            onClick={() => setAssessmentToDelete(null)}
+                            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isDeletingAssessment}
+                            onClick={async () => {
+                              if (!assessmentToDelete) return;
+                              setIsDeletingAssessment(true);
+                              setAssessmentErrorMsg(null);
+                              try {
+                                await assessmentService.deleteAssessment(
+                                  assessmentToDelete.id,
+                                  currentUser?.name || 'Administrador'
+                                );
+                                onDeleteAssessment?.(assessmentToDelete.id);
+                                setAssessmentSuccessMsg('Medição excluída com sucesso.');
+                                setTimeout(() => setAssessmentSuccessMsg(null), 3000);
+                              } catch (err: any) {
+                                setAssessmentErrorMsg(err?.message || 'Falha ao excluir medição.');
+                              } finally {
+                                setIsDeletingAssessment(false);
+                                setAssessmentToDelete(null);
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            {isDeletingAssessment ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <span>Excluindo...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span>Confirmar Exclusão</span>
+                              </>
+                            )}
+                          </button>
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    <div className="p-4 text-center text-slate-500">Nenhuma avaliação antropométrica registrada.</div>
                   )}
 
-                  <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400">
-                    <span className="font-semibold text-amber-300">Aviso:</span> O Índice de Massa Corporal (IMC) é exibido apenas como indicador biométrico auxiliar e não substitui avaliação médica clínica. Categorias de peso para torneios respeitam as regras oficiais da federação.
-                  </div>
-
-                  {activeAssessments.length > 0 && (
-                    <div className="border border-slate-800 rounded-lg overflow-hidden">
-                      <div className="bg-slate-950 px-3 py-2 font-semibold text-slate-300 text-[11px]">
-                        Histórico de Pesagens
-                      </div>
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase">
-                          <tr>
-                            <th className="py-2 px-3">Data</th>
-                            <th className="py-2 px-3">Peso</th>
-                            <th className="py-2 px-3">Altura</th>
-                            <th className="py-2 px-3">IMC</th>
-                            <th className="py-2 px-3">Avaliador</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                          {activeAssessments.map((a) => (
-                            <tr key={a.id}>
-                              <td className="py-2 px-3 font-mono">{formatDateBR(a.date)}</td>
-                              <td className="py-2 px-3 font-mono">{a.weightKg} kg</td>
-                              <td className="py-2 px-3 font-mono">{a.heightCm} cm</td>
-                              <td className="py-2 px-3 font-mono text-emerald-400">{a.bmi}</td>
-                              <td className="py-2 px-3 text-slate-400">{a.evaluatorName}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {/* Modal de Cadastro / Edição de Medição */}
+                  <AssessmentFormModal
+                    isOpen={isAssessmentModalOpen}
+                    onClose={() => {
+                      setIsAssessmentModalOpen(false);
+                      setAssessmentToEdit(null);
+                    }}
+                    student={selectedStudent}
+                    studentPerson={activePerson}
+                    currentUser={currentUser}
+                    assessmentToEdit={assessmentToEdit}
+                    onSuccess={(saved, isEdit) => {
+                      onSaveAssessment?.(saved);
+                      setAssessmentSuccessMsg(
+                        isEdit
+                          ? 'Medição atualizada com sucesso no banco de dados!'
+                          : 'Nova medição registrada com sucesso no banco de dados!'
+                      );
+                      setTimeout(() => setAssessmentSuccessMsg(null), 3500);
+                    }}
+                  />
                 </div>
               )}
 
