@@ -61,6 +61,7 @@ import { assessmentService } from '../../services/assessmentService';
 import { DataStore } from '../../data/storage';
 import { BmiEvolutionChart } from './BmiEvolutionChart';
 import { AssessmentFormModal } from './AssessmentFormModal';
+import { MedicalDocumentsSection } from './MedicalDocumentsSection';
 
 interface StudentsViewProps {
   students: Student[];
@@ -1389,21 +1390,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               )}
 
               {/* TAB 4: SAÚDE & ATESTADOS (LGPD) */}
-              {profileTab === 'health' && (
-                <div className="space-y-4">
+              {profileTab === 'health' && selectedStudent && (
+                <div className="space-y-6">
                   <div className="p-3.5 rounded-xl border border-red-500/20 bg-red-950/20 flex items-start gap-3">
                     <ShieldCheck className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
                     <div>
                       <div className="font-bold text-white text-xs">Proteção LGPD de Dados Sensíveis de Saúde</div>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Registros médicos, restrições e atestados são classificados como dados sensíveis e acessíveis apenas a administradores e instrutores autorizados.
+                        Registros médicos, restrições e atestados são classificados como dados sensíveis e acessíveis apenas a administradores e instrutores autorizados com isolamento multi-tenant.
                       </p>
                     </div>
                   </div>
 
-                  {activeHealth ? (
+                  {activeHealth && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="p-3 rounded-lg border border-slate-800 bg-slate-950/60 space-y-2">
+                      <div className="p-3 rounded-lg border border-slate-800 bg-slate-950/60 space-y-2 text-xs">
                         <div className="font-semibold text-slate-200">Condições Clínicas & Restrições</div>
                         <div className="text-slate-400">Condições: <span className="text-white font-medium">{activeHealth.conditions?.join(', ') || 'Nenhuma informada'}</span></div>
                         <div className="text-slate-400">Alergias: <span className="text-white">{activeHealth.allergies?.join(', ') || 'Nenhuma informada'}</span></div>
@@ -1411,8 +1412,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <div className="text-slate-400">Medicamentos: <span className="text-white">{activeHealth.voluntaryMedications || 'Nenhum'}</span></div>
                       </div>
 
-                      <div className="p-3 rounded-lg border border-slate-800 bg-slate-950/60 space-y-2">
-                        <div className="font-semibold text-slate-200">Atestado Médico & Liberação</div>
+                      <div className="p-3 rounded-lg border border-slate-800 bg-slate-950/60 space-y-2 text-xs">
+                        <div className="font-semibold text-slate-200">Atestado Geral & Liberação</div>
                         <div className="flex items-center gap-2">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
@@ -1427,7 +1428,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           </span>
                         </div>
                         <div className="text-slate-400 text-[11px]">
-                          Vencimento do Atestado: <span className="text-white font-mono">{formatDateBR(activeHealth.medicalCertExpiryDate)}</span>
+                          Vencimento do Atestado Geral: <span className="text-white font-mono">{formatDateBR(activeHealth.medicalCertExpiryDate)}</span>
                         </div>
                         {activeHealth.emergencyContactNotes && (
                           <div className="text-amber-400 text-[11px] bg-amber-950/20 p-2 rounded border border-amber-500/30">
@@ -1436,9 +1437,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="p-4 text-center text-slate-500">Nenhum prontuário de saúde preenchido para este aluno.</div>
                   )}
+
+                  {/* Seção Completa de Documentos Médicos & Atestados */}
+                  <MedicalDocumentsSection
+                    student={selectedStudent}
+                    studentPerson={activePerson}
+                    currentUser={currentUser || null}
+                    onDocumentChange={() => {
+                      // Permite atualizar estado pai se necessário
+                    }}
+                  />
                 </div>
               )}
 

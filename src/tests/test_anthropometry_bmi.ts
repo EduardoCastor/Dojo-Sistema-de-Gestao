@@ -86,6 +86,7 @@ async function runTestSuite() {
       weightKg: 54.0,
       heightCm: 165.0,
       bmi: 19.8,
+      evaluatorName: 'Sensei Teste',
     },
     {
       id: 'm2',
@@ -95,6 +96,7 @@ async function runTestSuite() {
       weightKg: 48.0,
       heightCm: 160.0,
       bmi: 18.8,
+      evaluatorName: 'Sensei Teste',
     },
     {
       id: 'm3',
@@ -104,6 +106,7 @@ async function runTestSuite() {
       weightKg: 51.5,
       heightCm: 163.0,
       bmi: 19.4,
+      evaluatorName: 'Sensei Teste',
     },
   ];
 
@@ -163,7 +166,6 @@ async function runTestSuite() {
       date: todayYmd,
       weightKg: 0,
       heightCm: 170,
-      bmi: 0,
     });
     assert(false, 'Deveria rejeitar peso <= 0');
   } catch (err: any) {
@@ -178,7 +180,6 @@ async function runTestSuite() {
       date: todayYmd,
       weightKg: 60,
       heightCm: 0,
-      bmi: 0,
     });
     assert(false, 'Deveria rejeitar altura <= 0');
   } catch (err: any) {
@@ -196,7 +197,6 @@ async function runTestSuite() {
       date: '2099-12-31', // futuro distante
       weightKg: 70,
       heightCm: 175,
-      bmi: 22.9,
     });
     assert(false, 'Deveria rejeitar data futura');
   } catch (err: any) {
@@ -210,7 +210,6 @@ async function runTestSuite() {
       date: todayYmd,
       weightKg: -10,
       heightCm: 175,
-      bmi: 22.9,
     });
     assert(false, 'Deveria rejeitar peso negativo');
   } catch (err: any) {
@@ -234,7 +233,7 @@ async function runTestSuite() {
     'Fallback seguro para tabela geral de adultos quando data de nascimento ausente'
   );
   assert(
-    fallbackAdultClass.warning?.includes('Data de nascimento não informada'),
+    Boolean(fallbackAdultClass.warning?.includes('Data de nascimento não informada')),
     'Aviso claro sobre ausência de data de nascimento'
   );
 
@@ -294,9 +293,9 @@ async function runTestSuite() {
   console.log('\n11. Testando Alerta e interpretação para idosos (>= 60 anos)...');
   const seniorBirth = '1955-03-20'; // ~70 anos
   const seniorClass = classifyBmi(23.0, seniorBirth, 'male', '2026-01-01');
-  assert(seniorClass.isElderly, 'Flag isElderly é true para idade >= 60');
+  assert(Boolean(seniorClass.isElderly), 'Flag isElderly é true para idade >= 60');
   assert(
-    seniorClass.warning?.includes('60 anos') || seniorClass.warning?.includes('geriátrica'),
+    Boolean(seniorClass.warning?.includes('60 anos') || seniorClass.warning?.includes('geriátrica')),
     'Alerta informativo sobre interpretação geriátrica exibido'
   );
 
@@ -310,7 +309,6 @@ async function runTestSuite() {
     date: '2026-02-10',
     weightKg: 52.0,
     heightCm: 164.0,
-    bmi: 19.3,
   });
 
   const updatedRecord = await assessmentService.updateAssessment(
@@ -318,7 +316,6 @@ async function runTestSuite() {
     {
       weightKg: 55.0, // peso alterado
       heightCm: 165.0, // altura alterada
-      bmi: 20.2,
       notes: 'Correção pós-pesagem oficial',
     },
     'Sensei Master'
@@ -339,7 +336,6 @@ async function runTestSuite() {
     date: '2026-03-01',
     weightKg: 60.0,
     heightCm: 170.0,
-    bmi: 20.8,
   });
 
   const allBefore = DataStore.getPhysicalAssessments('tenant-kodokan');

@@ -96,19 +96,22 @@ export const assessmentService = {
    * Registra uma nova medição antropométrica.
    * Calcula automaticamente o IMC e a classificação com base na data de nascimento e sexo.
    */
-  async createAssessment(payload: CreateAssessmentPayload): Promise<PhysicalAssessment> {
+  async createAssessment(
+    payload: CreateAssessmentPayload,
+    currentUserName?: string
+  ): Promise<PhysicalAssessment> {
     const {
       tenantId,
       studentId,
       date,
       weightKg,
       heightCm,
-      evaluatorName,
       notes,
       recordedByUserId,
       birthDate,
       gender,
     } = payload;
+    const evaluatorName = payload.evaluatorName || currentUserName || 'Avaliador';
 
     // Validações rigorosas
     if (!weightKg || weightKg <= 0 || weightKg > 400) {

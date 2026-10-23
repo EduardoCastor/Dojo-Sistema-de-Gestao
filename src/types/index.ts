@@ -145,6 +145,67 @@ export interface PhysicalAssessment {
   updatedAt?: string;
 }
 
+export type MedicalDocumentType =
+  | 'medical_report'        // Laudo Médico
+  | 'medical_certificate'   // Atestado Médico
+  | 'exam'                  // Exame Médico
+  | 'declaration'           // Declaração Médica
+  | 'authorization'         // Autorização Médica
+  | 'other';                // Outro Documento de Saúde
+
+export type MedicalDocumentStatus = 'valid' | 'expiring_soon' | 'expired' | 'no_expiry';
+
+export interface StudentMedicalDocument {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  documentType: MedicalDocumentType;
+  title: string;
+  issueDate: string; // YYYY-MM-DD (informada pelo usuário)
+  uploadedAt: string; // ISO timestamp (gerada automaticamente)
+  expiryDate?: string; // YYYY-MM-DD (quando aplicável)
+  notes?: string;
+  storagePath: string; // Caminho no bucket privado (tenant_id/student_id/filename)
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number; // bytes
+  createdByUserId?: string;
+  createdByUserName?: string;
+  fileUrl?: string; // URL assinada de curta duração ou data-URI local
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateMedicalDocumentPayload {
+  tenantId: string;
+  studentId: string;
+  documentType: MedicalDocumentType;
+  title: string;
+  issueDate: string; // YYYY-MM-DD
+  expiryDate?: string; // YYYY-MM-DD
+  notes?: string;
+  storagePath?: string;
+  originalFileName?: string;
+  mimeType?: string;
+  fileSize?: number;
+  createdByUserId?: string;
+  createdByUserName?: string;
+  fileDataUri?: string; // Cache data-URI para fallback offline
+}
+
+export interface UpdateMedicalDocumentPayload {
+  documentType?: MedicalDocumentType;
+  title?: string;
+  issueDate?: string;
+  expiryDate?: string | null;
+  notes?: string | null;
+  storagePath?: string;
+  originalFileName?: string;
+  mimeType?: string;
+  fileSize?: number;
+  fileDataUri?: string;
+}
+
 export interface HealthRecord {
   id: string;
   tenantId: string;
@@ -159,10 +220,13 @@ export interface HealthRecord {
   medicalDocs: {
     id: string;
     title: string;
-    docType: 'medical_certificate' | 'exam' | 'declaration' | 'authorization';
+    docType: 'medical_certificate' | 'exam' | 'declaration' | 'authorization' | 'medical_report' | 'other';
     uploadDate: string;
     expiresAt?: string;
     fileUrl: string;
+    storagePath?: string;
+    mimeType?: string;
+    fileSize?: number;
   }[];
 }
 
