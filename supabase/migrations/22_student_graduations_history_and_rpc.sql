@@ -67,7 +67,15 @@ FOR DELETE TO authenticated
 USING (public.has_tenant_role(tenant_id, 'owner', 'branch_manager'));
 
 -- ============================================================================
--- 4. FUNÇÃO RPC ATÔMICA: RECORD_STUDENT_GRADUATION
+-- 4. LIMPAR ROTINAS ANTERIORES (EVITA ERRO 42P13: cannot remove parameter defaults)
+-- ============================================================================
+DROP FUNCTION IF EXISTS public.record_student_graduation(uuid, uuid, uuid, uuid, text, text);
+DROP FUNCTION IF EXISTS public.record_student_graduation(uuid, uuid, uuid, uuid, date, text, text, text);
+DROP FUNCTION IF EXISTS public.update_student_graduation(uuid, uuid, uuid, uuid, date, text, text, text);
+DROP FUNCTION IF EXISTS public.delete_student_graduation(uuid, uuid);
+
+-- ============================================================================
+-- 5. FUNÇÃO RPC ATÔMICA: RECORD_STUDENT_GRADUATION
 -- ============================================================================
 -- Suporta data retroativa, validação estrita da modalidade e faixa na academia,
 -- nome do avaliador/examinador, código comprobatório e observações.
@@ -240,7 +248,7 @@ END;
 $$;
 
 -- ============================================================================
--- 5. FUNÇÃO RPC ATÔMICA: UPDATE_STUDENT_GRADUATION (CORREÇÃO DE REGISTRO)
+-- 6. FUNÇÃO RPC ATÔMICA: UPDATE_STUDENT_GRADUATION (CORREÇÃO DE REGISTRO)
 -- ============================================================================
 CREATE OR REPLACE FUNCTION public.update_student_graduation(
   p_tenant_id uuid,
@@ -363,7 +371,7 @@ END;
 $$;
 
 -- ============================================================================
--- 6. FUNÇÃO RPC ATÔMICA: DELETE_STUDENT_GRADUATION
+-- 7. FUNÇÃO RPC ATÔMICA: DELETE_STUDENT_GRADUATION
 -- ============================================================================
 CREATE OR REPLACE FUNCTION public.delete_student_graduation(
   p_tenant_id uuid,
@@ -442,7 +450,7 @@ BEGIN
 END;
 $$;
 
--- 7. CONCEDER PERMISSÕES DE EXECUÇÃO
+-- 8. CONCEDER PERMISSÕES DE EXECUÇÃO
 GRANT EXECUTE ON FUNCTION public.record_student_graduation(uuid, uuid, uuid, uuid, date, text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.record_student_graduation(uuid, uuid, uuid, uuid, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_student_graduation(uuid, uuid, uuid, uuid, date, text, text, text) TO authenticated;
