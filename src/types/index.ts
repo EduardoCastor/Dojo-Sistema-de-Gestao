@@ -702,3 +702,173 @@ export interface AuditLog {
   timestamp: string;
   details: string;
 }
+
+// ============================================================================
+// MÓDULO CENTRAL DO PROPRIETÁRIO DO SAAS (SUPERADMIN & ASSINATURAS RECORRENTES)
+// ============================================================================
+
+export type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+
+export type SaaSSubscriptionStatus =
+  | 'trial'             // Em período de teste (10 dias)
+  | 'waiting_payment'   // Aguardando confirmação do primeiro pagamento ou renovação
+  | 'active'            // Assinatura regular e em dia
+  | 'past_due'          // Pagamento atrasado (dentro ou fora do período de tolerância)
+  | 'suspended'         // Suspensa administrativamente pelo operador da plataforma
+  | 'canceled'          // Cancelada pelo cliente ou por rescisão contratual
+  | 'expired';          // Período de teste ou vigência expirado sem renovação
+
+export interface SaaSCommercialPlan {
+  id: string; // ex: 'plan-basic', 'plan-advanced', 'plan-enterprise', 'trial'
+  name: string;
+  description: string;
+  tagline?: string;
+  price: number; // Preço base do ciclo mensal em BRL
+  currency: 'BRL';
+  billingCycle: BillingCycle;
+  cycleMultiplier?: number; // Ex: 1 para mensal, 3 para trimestral, 12 para anual
+  trialDays: number;
+  maxStudents: number;
+  maxBranches: number;
+  maxStorageGb: number;
+  features: {
+    digitalLibrary: boolean;
+    beltExams: boolean;
+    competitions: boolean;
+    advancedReports: boolean;
+    multiBranch: boolean;
+    customBranding: boolean;
+    automatedNotifications: boolean;
+  };
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaaSSubscription {
+  id: string;
+  tenantId: string;
+  planId: string;
+  planName: string;
+  status: SaaSSubscriptionStatus;
+  billingCycle: BillingCycle;
+  amount: number;
+  startedAt: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  nextDueDate: string;
+  trialExpiresAt?: string;
+  gracePeriodDays: number; // Dias de tolerância antes de bloqueio por atraso (default: 5 dias)
+  gatewayCustomerId?: string;
+  gatewaySubscriptionId?: string;
+  cancelReason?: string;
+  canceledAt?: string;
+  suspendedReason?: string;
+  suspendedAt?: string;
+  lastPaymentId?: string;
+  manualActivation?: {
+    activatedByUserId: string;
+    activatedByUserName: string;
+    reason: string;
+    activatedAt: string;
+    extendedDays: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SaaSPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded';
+export type SaaSPaymentMethod = 'pix' | 'credit_card' | 'boleto';
+
+export interface SaaSPayment {
+  id: string;
+  subscriptionId: string;
+  tenantId: string;
+  amount: number;
+  currency: 'BRL';
+  dueDate: string;
+  paidAt?: string;
+  status: SaaSPaymentStatus;
+  paymentMethod: SaaSPaymentMethod;
+  gatewayChargeId?: string;
+  gatewayPaymentId?: string;
+  billingPeriodStart: string;
+  billingPeriodEnd: string;
+  invoiceUrl?: string;
+  pixQrCode?: string;
+  pixCopyPaste?: string;
+  barcode?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaaSPaymentWebhookEvent {
+  id: string;
+  eventId: string; // Chave de idempotência do provedor
+  gatewayName: 'asaas' | 'mercadopago' | 'stripe';
+  eventType: string; // Ex: 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE', 'PAYMENT_REFUNDED'
+  processedAt: string;
+  payload: any;
+  status: 'processed' | 'ignored' | 'failed';
+  errorDetails?: string;
+}
+
+export interface PlatformAuditLog {
+  id: string;
+  actorUserId: string;
+  actorUserName: string;
+  action:
+    | 'create_plan'
+    | 'update_plan'
+    | 'change_plan_status'
+    | 'suspend_tenant'
+    | 'reactivate_tenant'
+    | 'cancel_subscription'
+    | 'manual_activate_subscription'
+    | 'change_subscription_plan'
+    | 'process_payment_webhook'
+    | 'refund_payment'
+    | 'register_tenant';
+  entityType: 'tenant' | 'plan' | 'subscription' | 'payment' | 'gateway';
+  entityId: string;
+  tenantId?: string;
+  tenantName?: string;
+  reason?: string;
+  details: string;
+  metadata?: Record<string, any>;
+  timestamp: string;
+}
+
+export interface TenantAccessEvaluation {
+  isAllowed: boolean;
+  accessState:
+    | 'active'
+    | 'trial'
+    | 'trial_expired'
+    | 'grace_period'
+    | 'blocked_past_due'
+    | 'blocked_suspended'
+    | 'blocked_canceled'
+    | 'waiting_payment';
+  message: string;
+  daysRemaining?: number;
+  graceDaysLeft?: number;
+  allowedModules: {
+    digitalLibrary: boolean;
+    beltExams: boolean;
+    competitions: boolean;
+    advancedReports: boolean;
+    multiBranch: boolean;
+    customBranding: boolean;
+  };
+  limits: {
+    maxStudents: number;
+    currentStudents: number;
+    isStudentsLimitReached: boolean;
+    maxBranches: number;
+    currentBranches: number;
+    isBranchesLimitReached: boolean;
+  };
+}
+

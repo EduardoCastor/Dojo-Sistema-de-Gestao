@@ -691,6 +691,17 @@ export default function App() {
   };
 
   const handleOpenCreateStudent = () => {
+    // Validação estrita dos limites do plano comercial contratado
+    const commPlans = DataStore.getCommercialPlans();
+    const currentPlan = commPlans.find(p => p.id === activeTenant.planId);
+    const maxStudents = currentPlan?.maxStudents || (activeTenant.planId === 'basic' ? 100 : 500);
+
+    if (students.length >= maxStudents && currentUser.role !== 'superadmin') {
+      alert(`Limite de alunos cadastrados atingido para o plano ${currentPlan?.name || activeTenant.planId.toUpperCase()} (${students.length}/${maxStudents} alunos). Faça upgrade do seu plano para continuar matriculando.`);
+      setIsUpgradePlanOpen(true);
+      return;
+    }
+
     setEditingStudent(null);
     setIsNewStudentOpen(true);
   };
@@ -1326,6 +1337,7 @@ export default function App() {
           onSwitchPersona={() => setIsLoginOpen(true)}
           onLogout={handleLogout}
           onUpgradePlan={() => setIsUpgradePlanOpen(true)}
+          onNavigateToSuperAdmin={() => setCurrentView('superadmin')}
         >
           {adminTab === 'overview' && (
             <OverviewDashboard
@@ -1601,41 +1613,63 @@ export default function App() {
 
       {/* VIEW 5: CENTRAL SAAS SUPERADMIN CONSOLE */}
       {currentView === 'superadmin' && (
-        <div className="min-h-screen p-4 sm:p-6 lg:p-8 bg-slate-950">
-          <div className="max-w-6xl mx-auto flex items-center justify-between pb-6 border-b border-slate-800 mb-6">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-lg text-white">TatameHub Central</span>
-              <span className="text-xs bg-red-600 px-2 py-0.5 rounded text-white font-semibold">SuperAdmin</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsLoginOpen(true)}
-                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300 hover:text-white"
-              >
-                Trocar Persona
-              </button>
-              <button
-                onClick={handleLogout}
-                className="px-3 py-1.5 rounded-lg bg-red-600 text-xs font-semibold text-white hover:bg-red-500"
-              >
-                Sair / Desconectar
-              </button>
+        currentUser.role !== 'superadmin' ? (
+          <div className="min-h-screen p-8 bg-slate-950 flex items-center justify-center">
+            <div className="max-w-md w-full bg-slate-900 border border-rose-500/40 p-6 rounded-3xl text-center space-y-4 shadow-2xl">
+              <div className="h-14 w-14 mx-auto rounded-2xl bg-rose-950/80 border border-rose-500/40 text-rose-400 flex items-center justify-center font-bold text-lg">
+                403
+              </div>
+              <h2 className="text-lg font-bold text-white">Acesso Exclusivo ao Proprietário do SaaS</h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                O papel <strong>{currentUser.role}</strong> da academia não possui autorização para administrar a plataforma global, planos comerciais ou assinaturas de terceiros.
+              </p>
+              <div className="pt-2">
+                <button
+                  onClick={() => setCurrentView('admin')}
+                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  Voltar ao Painel da Academia
+                </button>
+              </div>
             </div>
           </div>
+        ) : (
+          <div className="min-h-screen p-4 sm:p-6 lg:p-8 bg-slate-950">
+            <div className="max-w-7xl mx-auto flex items-center justify-between pb-6 border-b border-slate-800 mb-6">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-lg text-white">TatameHub Central</span>
+                <span className="text-xs bg-red-600 px-2 py-0.5 rounded text-white font-semibold">SuperAdmin</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsLoginOpen(true)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300 hover:text-white cursor-pointer"
+                >
+                  Trocar Persona
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-xs font-semibold text-white hover:bg-red-500 cursor-pointer"
+                >
+                  Sair / Desconectar
+                </button>
+              </div>
+            </div>
 
-          <PlatformAdminView
-            tenants={tenants}
-            plans={plans}
-            currentUser={currentUser}
-            onUpdatePlans={handleUpdatePlans}
-            onUpdateTenantStatus={handleUpdateTenantStatus}
-            onSwitchTenant={(tId) => {
-              setCurrentTenantId(tId);
-              setCurrentView('admin');
-              setAdminTab('overview');
-            }}
-          />
-        </div>
+            <PlatformAdminView
+              tenants={tenants}
+              plans={plans}
+              currentUser={currentUser}
+              onUpdatePlans={handleUpdatePlans}
+              onUpdateTenantStatus={handleUpdateTenantStatus}
+              onSwitchTenant={(tId) => {
+                setCurrentTenantId(tId);
+                setCurrentView('admin');
+                setAdminTab('overview');
+              }}
+            />
+          </div>
+        )
       )}
 
       {/* GLOBAL MODALS */}

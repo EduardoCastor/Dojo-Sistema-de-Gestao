@@ -26,6 +26,10 @@ import {
   MembershipPlan,
   FinancialTransaction,
   PaymentReminder,
+  SaaSCommercialPlan,
+  SaaSSubscription,
+  SaaSPayment,
+  PlatformAuditLog,
 } from '../types';
 
 import {
@@ -56,6 +60,10 @@ import {
   INITIAL_MEMBERSHIP_PLANS,
   INITIAL_FINANCIAL_TRANSACTIONS,
   INITIAL_PAYMENT_REMINDERS,
+  INITIAL_COMMERCIAL_PLANS,
+  INITIAL_SAAS_SUBSCRIPTIONS,
+  INITIAL_SAAS_PAYMENTS,
+  INITIAL_PLATFORM_AUDIT_LOGS,
 } from './initialData';
 
 const STORAGE_PREFIX = 'tatamehub_';
@@ -418,7 +426,100 @@ export class DataStore {
     save('audit_logs', [newLog, ...all]);
   }
 
+  // ==========================================================================
+  // MÉTODOS DO PROPRIETÁRIO DO SAAS (SUPERADMIN CONSOLE)
+  // ==========================================================================
+
+  static getCommercialPlans(): SaaSCommercialPlan[] {
+    return load('commercial_plans', INITIAL_COMMERCIAL_PLANS);
+  }
+
+  static saveCommercialPlans(plans: SaaSCommercialPlan[]): void {
+    save('commercial_plans', plans);
+  }
+
+  static getSaaSSubscriptions(tenantId?: string): SaaSSubscription[] {
+    const all = load('saas_subscriptions', INITIAL_SAAS_SUBSCRIPTIONS);
+    return tenantId ? all.filter(s => s.tenantId === tenantId) : all;
+  }
+
+  static saveSaaSSubscriptions(subs: SaaSSubscription[]): void {
+    save('saas_subscriptions', subs);
+  }
+
+  static saveSaaSSubscription(sub: SaaSSubscription): void {
+    const all = load('saas_subscriptions', INITIAL_SAAS_SUBSCRIPTIONS);
+    const index = all.findIndex(s => s.id === sub.id || s.tenantId === sub.tenantId);
+    if (index >= 0) {
+      all[index] = sub;
+      save('saas_subscriptions', [...all]);
+    } else {
+      save('saas_subscriptions', [sub, ...all]);
+    }
+  }
+
+  static getSaaSPayments(tenantId?: string): SaaSPayment[] {
+    const all = load('saas_payments', INITIAL_SAAS_PAYMENTS);
+    return tenantId ? all.filter(p => p.tenantId === tenantId) : all;
+  }
+
+  static saveSaaSPayments(payments: SaaSPayment[]): void {
+    save('saas_payments', payments);
+  }
+
+  static saveSaaSPayment(payment: SaaSPayment): void {
+    const all = load('saas_payments', INITIAL_SAAS_PAYMENTS);
+    const index = all.findIndex(p => p.id === payment.id);
+    if (index >= 0) {
+      all[index] = payment;
+      save('saas_payments', [...all]);
+    } else {
+      save('saas_payments', [payment, ...all]);
+    }
+  }
+
+  static getPlatformAuditLogs(): PlatformAuditLog[] {
+    return load('platform_audit_logs', INITIAL_PLATFORM_AUDIT_LOGS);
+  }
+
+  static logPlatformAudit(
+    actorUserId: string,
+    actorUserName: string,
+    action: PlatformAuditLog['action'],
+    entityType: PlatformAuditLog['entityType'],
+    entityId: string,
+    details: string,
+    options?: {
+      tenantId?: string;
+      tenantName?: string;
+      reason?: string;
+      metadata?: Record<string, any>;
+    }
+  ): PlatformAuditLog {
+    const all = load('platform_audit_logs', INITIAL_PLATFORM_AUDIT_LOGS);
+    const newLog: PlatformAuditLog = {
+      id: `plog-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      actorUserId,
+      actorUserName,
+      action,
+      entityType,
+      entityId,
+      tenantId: options?.tenantId,
+      tenantName: options?.tenantName,
+      reason: options?.reason,
+      details,
+      metadata: options?.metadata,
+      timestamp: new Date().toISOString(),
+    };
+    save('platform_audit_logs', [newLog, ...all]);
+    return newLog;
+  }
+
   static resetToSeed(): void {
-    localStorage.clear();
+    if (typeof localStorage !== 'undefined') {
+      localStorage.clear();
+    }
+    memoryStorage.clear();
   }
 }
+

@@ -17,12 +17,17 @@ import {
   Clock,
   Sparkles,
   ArrowRightLeft,
+  LayoutGrid,
+  Shield,
+  AlertCircle,
   Menu,
   X,
   UserCheck,
-  LayoutGrid,
 } from 'lucide-react';
 import { User, Tenant, Branch } from '../../types';
+import { saasPlatformService } from '../../services/saasPlatformService';
+import { DataStore } from '../../data/storage';
+import { TenantAccessRestrictedView } from '../common/TenantAccessRestrictedView';
 
 export type AdminViewTab =
   | 'overview'
@@ -51,6 +56,7 @@ interface DashboardLayoutProps {
   onSwitchPersona: () => void;
   onLogout: () => void;
   onUpgradePlan: () => void;
+  onNavigateToSuperAdmin?: () => void;
   children: React.ReactNode;
 }
 
@@ -65,9 +71,25 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onSwitchPersona,
   onLogout,
   onUpgradePlan,
+  onNavigateToSuperAdmin,
   children,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // SaaS Subscription & Access Evaluation
+  const subscriptions = DataStore.getSaaSSubscriptions();
+  const subscription = subscriptions.find(s => s.tenantId === tenant.id) || null;
+  const commercialPlans = DataStore.getCommercialPlans();
+  const currentCommercialPlan = commercialPlans.find(p => p.id === tenant.planId) || null;
+  const currentStudents = DataStore.getStudents(tenant.id);
+
+  const accessEvaluation = saasPlatformService.evaluateTenantAccess(
+    tenant,
+    subscription,
+    currentCommercialPlan,
+    currentStudents.length,
+    branches.length
+  );
 
   // Calculate trial days left
   const calculateDaysLeft = () => {
@@ -242,9 +264,24 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             )}
           </div>
 
-          {/* Trial countdown banner or Upgrade CTA */}
+          {/* Right Header Badges & SuperAdmin Inspection Banner */}
           <div className="flex items-center gap-3">
-            {trialDaysLeft !== null && (
+            {currentUser.role === 'superadmin' && (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-950/80 border border-amber-500/40 text-amber-300 text-xs">
+                <Shield className="h-3.5 w-3.5 text-amber-400" />
+                <span className="font-semibold">Modo Inspeção SuperAdmin</span>
+                {onNavigateToSuperAdmin && (
+                  <button
+                    onClick={onNavigateToSuperAdmin}
+                    className="ml-2 px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[10px] uppercase transition-colors cursor-pointer"
+                  >
+                    Voltar ao Console
+                  </button>
+                )}
+              </div>
+            )}
+
+            {trialDaysLeft !== null && currentUser.role !== 'superadmin' && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/60 border border-amber-600/40 text-amber-300 text-xs">
                 <Clock className="h-3.5 w-3.5 text-amber-400" />
                 <span>
@@ -259,10 +296,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               </div>
             )}
 
-            {tenant.status === 'active' && (
+            {tenant.status === 'active' && currentUser.role !== 'superadmin' && (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Plano {tenant.planId.toUpperCase()}</span>
+                <span>Plano {currentCommercialPlan?.name || tenant.planId.toUpperCase()}</span>
               </div>
             )}
           </div>
@@ -270,7 +307,40 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
         {/* Viewport content */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-950">
-          {children}
+          {/* 1. Bloqueio de Acesso se Não Autorizado (Suspensa, Expirada ou Inadimplente fora da carência) */}
+          {!accessEvaluation.isAllowed && currentUser.role !== 'superadmin' ? (
+            <TenantAccessRestrictedView
+              tenant={tenant}
+              accessState={accessEvaluation.accessState as any}
+              message={accessEvaluation.message}
+              subscription={subscription}
+              plans={commercialPlans}
+              onOpenUpgradeModal={onUpgradePlan}
+            />
+          ) : (
+            <>
+              {/* 2. Banner de Carência (Past Due mas ainda dentro da tolerância de 5 dias) */}
+              {accessEvaluation.accessState === 'grace_period' && (
+                <div className="mb-6 p-4 rounded-xl border border-amber-500/40 bg-amber-950/40 text-xs text-amber-200 flex items-center justify-between gap-3 shadow-lg">
+                  <div className="flex items-center gap-2.5">
+                    <AlertCircle className="h-5 w-5 text-amber-400 shrink-0" />
+                    <div>
+                      <strong className="text-white block font-semibold">Aviso de Mensalidade do SaaS Pendente</strong>
+                      <span className="text-[11px] text-amber-200/90">{accessEvaluation.message}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={onUpgradePlan}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Regularizar Fatura
+                  </button>
+                </div>
+              )}
+
+              {children}
+            </>
+          )}
         </main>
       </div>
     </div>
