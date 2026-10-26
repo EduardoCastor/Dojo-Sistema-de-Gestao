@@ -11,13 +11,13 @@ export const OFFICIAL_DOMAINS = {
   MAIN_SITE_URL: 'https://tatameclub.com.br',
   SAAS_ADMIN_PANEL: 'painel.tatameclub.com.br',
   SAAS_ADMIN_PANEL_URL: 'https://painel.tatameclub.com.br',
-  PLATFORM_OWNER_EMAIL: 'admin@tatameclub.com.br',
+  PLATFORM_OWNER_EMAIL: 'beaverstraining@gmail.com',
   // CamelCase aliases for UI convenience
   mainSiteHost: 'tatameclub.com.br',
   mainSiteUrl: 'https://tatameclub.com.br',
   saasAdminHost: 'painel.tatameclub.com.br',
   saasAdminUrl: 'https://painel.tatameclub.com.br',
-  platformOwnerEmail: 'admin@tatameclub.com.br',
+  platformOwnerEmail: 'beaverstraining@gmail.com',
 } as const;
 
 export type AppEnvironmentMode = 'main_site' | 'saas_admin_panel';

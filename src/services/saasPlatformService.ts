@@ -1222,7 +1222,7 @@ export const saasPlatformService = {
   },
 
   /**
-   * Bootstrap seguro do proprietário global do SaaS (admin@tatameclub.com.br).
+   * Bootstrap seguro do proprietário global do SaaS (beaverstraining@gmail.com).
    * NUNCA utiliza senha fixa no código-fonte. Valida estritamente a identidade do e-mail autorizado.
    */
   async bootstrapPlatformOwner(params: {

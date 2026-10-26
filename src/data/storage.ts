@@ -127,12 +127,24 @@ export class DataStore {
   }
 
   static getUsers(tenantId?: string): User[] {
-    const all = load('users', INITIAL_USERS);
+    const all = DataStore.getAllUsers();
     return tenantId && tenantId !== 'platform' ? all.filter(u => u.tenantId === tenantId) : all;
   }
 
   static getAllUsers(): User[] {
-    return load('users', INITIAL_USERS);
+    const all = load('users', INITIAL_USERS);
+    let changed = false;
+    const normalized = all.map(u => {
+      if (u.role === 'superadmin' && u.email !== 'beaverstraining@gmail.com') {
+        changed = true;
+        return { ...u, email: 'beaverstraining@gmail.com' };
+      }
+      return u;
+    });
+    if (changed) {
+      save('users', normalized);
+    }
+    return normalized;
   }
 
   static saveUsers(users: User[]): void {

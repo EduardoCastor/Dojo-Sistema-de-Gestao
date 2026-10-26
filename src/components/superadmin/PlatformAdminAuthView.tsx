@@ -109,7 +109,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
           if (signUpData?.user && !signUpData.session) {
             setInfoMessage(
-              'Conta criada no Supabase Auth! Como o domínio @tatameclub.com.br ainda não possui caixa de e-mail para receber o link de confirmação, execute a Migration 25 no SQL Editor do Supabase (ou desative "Confirm email" em Authentication > Providers > Email) — ou clique no botão "Entrar em Modo de Teste (Pré-Domínio)" abaixo.'
+              'Conta criada no Supabase Auth! Confirme o e-mail enviado para beaverstraining@gmail.com (ou rode a Migration 25 no SQL Editor do Supabase) — ou clique no botão "Entrar em Modo de Teste Local" abaixo.'
             );
             setMode('login');
             return;
@@ -132,11 +132,11 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
           const rawMsg = signInError.message || '';
           if (rawMsg.toLowerCase().includes('email not confirmed')) {
             setError(
-              'A conta admin@tatameclub.com.br foi criada, mas o Supabase está aguardando confirmação de e-mail. Como o domínio ainda não foi publicado, rode "SELECT public.bootstrap_platform_owner_by_email();" no SQL Editor do Supabase (após aplicar a Migration 25) ou use o botão de Teste Pré-Domínio abaixo.'
+              'A conta beaverstraining@gmail.com foi criada, mas aguarda confirmação de e-mail. Verifique sua caixa de entrada do Gmail (ou rode "SELECT public.bootstrap_platform_owner_by_email();" no SQL Editor do Supabase) ou use o botão de Teste Local abaixo.'
             );
           } else {
             setError(
-              'Conta admin@tatameclub.com.br ainda não foi criada no Supabase Auth (ou a senha está incorreta). Clique na aba "1º Acesso (Criar Senha)" acima para cadastrar sua senha pela primeira vez.'
+              'Conta beaverstraining@gmail.com ainda não foi criada no Supabase Auth (ou a senha está incorreta). Clique na aba "1º Acesso (Criar Senha)" acima para cadastrar sua senha pela primeira vez.'
             );
           }
           return;
@@ -283,7 +283,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@tatameclub.com.br"
+                  placeholder="beaverstraining@gmail.com"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
                 />
               </div>

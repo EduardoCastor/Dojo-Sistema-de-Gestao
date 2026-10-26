@@ -41,10 +41,10 @@ async function runTests() {
   console.log('=== INICIANDO TESTES DE REESTRUTURAÇÃO DO TATAME CLUB ===\n');
 
   // 1. Verificar domínios oficiais e validação do proprietário do SaaS
-  console.log('1. Testando configuração de domínios e autorização exclusiva de admin@tatameclub.com.br...');
+  console.log('1. Testando configuração de domínios e autorização exclusiva de beaverstraining@gmail.com...');
   assert(OFFICIAL_DOMAINS.MAIN_SITE === 'tatameclub.com.br', 'Host principal deve ser tatameclub.com.br');
   assert(OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL === 'painel.tatameclub.com.br', 'Host do painel SaaS deve ser painel.tatameclub.com.br');
-  assert(isAuthorizedPlatformOwnerEmail('admin@tatameclub.com.br') === true, 'admin@tatameclub.com.br deve ser autorizado');
+  assert(isAuthorizedPlatformOwnerEmail('beaverstraining@gmail.com') === true, 'beaverstraining@gmail.com deve ser autorizado');
   assert(isAuthorizedPlatformOwnerEmail('sensei@kodokanbrasil.com.br') === false, 'Usuário de academia não deve ser autorizado como owner SaaS');
 
   assert(
@@ -65,15 +65,15 @@ async function runTests() {
   console.log('2. Testando bloqueio do painel SaaS para contas de academias...');
   await expectThrowsAsync(
     () => saasPlatformService.bootstrapPlatformOwner({ email: 'sensei@academia.com.br' }),
-    'Bootstrap deve negar e-mail diferente de admin@tatameclub.com.br'
+    'Bootstrap deve negar e-mail diferente de beaverstraining@gmail.com'
   );
 
   const authorizedSuperAdmin = await saasPlatformService.bootstrapPlatformOwner({
-    email: 'admin@tatameclub.com.br',
+    email: 'beaverstraining@gmail.com',
   });
   assert(
-    authorizedSuperAdmin.role === 'superadmin' && authorizedSuperAdmin.email === 'admin@tatameclub.com.br',
-    'Bootstrap deve autenticar admin@tatameclub.com.br como superadmin'
+    authorizedSuperAdmin.role === 'superadmin' && authorizedSuperAdmin.email === 'beaverstraining@gmail.com',
+    'Bootstrap deve autenticar beaverstraining@gmail.com como superadmin'
   );
   console.log('   ✅ Proteção de acesso ao Painel Global SaaS validada.');
 

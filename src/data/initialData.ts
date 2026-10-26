@@ -257,7 +257,7 @@ export const INITIAL_USERS: User[] = [
     id: 'user-superadmin',
     tenantId: 'platform',
     name: 'Proprietário Tatame Club',
-    email: 'admin@tatameclub.com.br',
+    email: 'beaverstraining@gmail.com',
     role: 'superadmin',
     phone: '(11) 99999-0000',
     active: true,

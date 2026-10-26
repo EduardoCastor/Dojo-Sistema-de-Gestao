@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Migration 25: Reestruturação Tatame Club — Limites por Licença (Usuários e
 --              Filiais), Gestão de Equipe da Academia, Isolamento Estrito e
---              Bootstrap Seguro do Administrador Global (admin@tatameclub.com.br)
+--              Bootstrap Seguro do Administrador Global (beaverstraining@gmail.com)
 -- PROJETO: Tatame Club (anteriormente TatameHub)
 -- ============================================================================
 -- OBJETIVO:
@@ -17,7 +17,7 @@
 --     e modalidades iniciais de forma transacional e isolada.
 --  5. Impedir que administradores de academia alterem sua própria licença/status
 --     na tabela tenants ou promovam a si mesmos a is_platform_admin.
---  6. Disponibilizar procedimento seguro de bootstrap para admin@tatameclub.com.br
+--  6. Disponibilizar procedimento seguro de bootstrap para beaverstraining@gmail.com
 --     sem qualquer senha fixa em código ou banco.
 -- ============================================================================
 
@@ -643,16 +643,15 @@ BEGIN
 END;
 $$;
 
--- 10. PROCEDIMENTO SEGURO DE BOOTSTRAP DO ADMINISTRADOR GLOBAL (admin@tatameclub.com.br)
+-- 10. PROCEDIMENTO SEGURO DE BOOTSTRAP DO ADMINISTRADOR GLOBAL (beaverstraining@gmail.com)
 -- IMPORTANTE:
 --  - Não contém senha fixa nem cria credenciais padrão.
---  - Permite o bootstrap inicial apenas para o e-mail oficial admin@tatameclub.com.br
+--  - Permite o bootstrap inicial apenas para o e-mail oficial beaverstraining@gmail.com
 --    quando ainda não existe nenhum is_platform_admin = true no banco, ou quando executado
---    pelo próprio admin@tatameclub.com.br / SQL Editor (postgres / service_role).
---  - Confirma automaticamente email_confirmed_at para admin@tatameclub.com.br caso o
---    domínio de e-mail ainda não esteja publicado em produção.
+--    pelo próprio beaverstraining@gmail.com / SQL Editor (postgres / service_role).
+--  - Confirma automaticamente email_confirmed_at para beaverstraining@gmail.com.
 CREATE OR REPLACE FUNCTION public.bootstrap_platform_owner_by_email(
-  p_email text DEFAULT 'admin@tatameclub.com.br',
+  p_email text DEFAULT 'beaverstraining@gmail.com',
   p_reason text DEFAULT 'Bootstrap inicial do proprietário da plataforma Tatame Club'
 )
 RETURNS jsonb
@@ -666,8 +665,8 @@ DECLARE
   v_jwt_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
 BEGIN
   -- Apenas o e-mail oficial do proprietário pode receber bootstrap
-  IF lower(trim(p_email)) <> 'admin@tatameclub.com.br' THEN
-    RAISE EXCEPTION 'Operação negada: o bootstrap global é exclusivo para admin@tatameclub.com.br.'
+  IF lower(trim(p_email)) <> 'beaverstraining@gmail.com' THEN
+    RAISE EXCEPTION 'Operação negada: o bootstrap global é exclusivo para beaverstraining@gmail.com.'
       USING ERRCODE = '42501';
   END IF;
 
@@ -675,26 +674,26 @@ BEGIN
     SELECT 1 FROM public.profiles WHERE is_platform_admin = true
   ) INTO v_has_existing_admin;
 
-  -- Se já existir um admin global configurado, exigir contexto privilegiado ou o próprio admin@tatameclub.com.br autenticado
+  -- Se já existir um admin global configurado, exigir contexto privilegiado ou o próprio beaverstraining@gmail.com autenticado
   IF v_has_existing_admin
      AND current_setting('role', true) NOT IN ('service_role', 'postgres', 'supabase_admin')
      AND NOT public.is_platform_admin()
-     AND v_jwt_email <> 'admin@tatameclub.com.br' THEN
-    RAISE EXCEPTION 'Operação restrita: o Administrador Global já foi inicializado. Execute alterações pelo SQL Editor ou autenticado como admin@tatameclub.com.br.'
+     AND v_jwt_email <> 'beaverstraining@gmail.com' THEN
+    RAISE EXCEPTION 'Operação restrita: o Administrador Global já foi inicializado. Execute alterações pelo SQL Editor ou autenticado como beaverstraining@gmail.com.'
       USING ERRCODE = '42501';
   END IF;
 
   SELECT id, email, email_confirmed_at, raw_user_meta_data
   INTO v_target_user
   FROM auth.users
-  WHERE lower(email) = 'admin@tatameclub.com.br'
+  WHERE lower(email) = 'beaverstraining@gmail.com'
   LIMIT 1;
 
   IF v_target_user.id IS NULL THEN
-    RAISE EXCEPTION 'A conta "admin@tatameclub.com.br" ainda não existe em auth.users. Utilize a aba "Primeiro Acesso" na tela do painel para definir sua senha antes de vincular o papel global.';
+    RAISE EXCEPTION 'A conta "beaverstraining@gmail.com" ainda não existe em auth.users. Utilize a aba "Primeiro Acesso" na tela do painel para definir sua senha antes de vincular o papel global.';
   END IF;
 
-  -- Auto-confirmar o e-mail de admin@tatameclub.com.br caso o domínio ainda não tenha servidor de e-mail ativo
+  -- Auto-confirmar o e-mail de beaverstraining@gmail.com caso ainda não esteja confirmado
   IF v_target_user.email_confirmed_at IS NULL THEN
     UPDATE auth.users
     SET email_confirmed_at = now(),
@@ -726,7 +725,7 @@ BEGIN
     metadata
   ) VALUES (
     v_target_user.id,
-    COALESCE(v_target_user.email, 'admin@tatameclub.com.br'),
+    COALESCE(v_target_user.email, 'beaverstraining@gmail.com'),
     'change_plan_status',
     'gateway',
     v_target_user.id::text,

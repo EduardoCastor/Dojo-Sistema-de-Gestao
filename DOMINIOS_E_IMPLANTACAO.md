@@ -1,6 +1,6 @@
 # Tatame Club — Configuração de Domínios Oficiais, Autenticação Global e Implantação
 
-Este documento detalha as configurações externas obrigatórias para disponibilizar a plataforma **Tatame Club** em seus domínios oficiais, configurar o administrador global do SaaS (`admin@tatameclub.com.br`) com segurança e aplicar as migrations no Supabase.
+Este documento detalha as configurações externas obrigatórias para disponibilizar a plataforma **Tatame Club** em seus domínios oficiais, configurar o administrador global do SaaS (`beaverstraining@gmail.com`) com segurança e aplicar as migrations no Supabase.
 
 ---
 
@@ -12,7 +12,7 @@ A aplicação opera com separação de contexto por hostname e rota:
   - Exibe a apresentação comercial, planos com limites de alunos, usuários e unidades, cadastro de novas academias (10 dias de teste grátis) e login exclusivo da academia vinculada ao usuário autenticado.
   - **Não abre nenhum painel de demonstração compartilhado.**
 - **Painel Administrativo Exclusivo do Proprietário SaaS**: `https://painel.tatameclub.com.br` (também acessível em homologação via `/painel` ou `?env=painel`)
-  - Restrito exclusivamente ao proprietário da plataforma (`admin@tatameclub.com.br` com `is_platform_admin = true` / `role = 'superadmin'`).
+  - Restrito exclusivamente ao proprietário da plataforma (`beaverstraining@gmail.com` com `is_platform_admin = true` / `role = 'superadmin'`).
   - Bloqueia qualquer usuário de academia (`owner`, `branch_manager`, `instructor`, `receptionist`, `financial`, `student`, `guardian`).
 
 ---
@@ -80,10 +80,10 @@ Esta migration realiza de forma idempotente:
 
 ---
 
-## 6. Inicialização Segura do Proprietário Global (`admin@tatameclub.com.br`)
+## 6. Inicialização Segura do Proprietário Global (`beaverstraining@gmail.com`)
 
 **Nenhuma senha foi fixada no código-fonte.** Para inicializar a conta do proprietário do SaaS em produção:
 
 1. Acesse `https://painel.tatameclub.com.br` (ou `/?env=painel`).
-2. Na tela de autenticação exclusiva do SaaS, selecione a aba **"Primeiro Acesso"** (ou crie o usuário diretamente em `Authentication -> Users` no painel do Supabase com o e-mail `admin@tatameclub.com.br` e uma senha forte).
-3. Ao autenticar com `admin@tatameclub.com.br`, a aplicação invoca `public.bootstrap_platform_owner_by_email()`, que verifica no servidor (`auth.jwt() ->> 'email'`) que o e-mail é estritamente `admin@tatameclub.com.br` e promove `profiles.is_platform_admin = true`, registrando o evento em `saas_audit_logs`.
+2. Na tela de autenticação exclusiva do SaaS, selecione a aba **"1º Acesso (Criar Senha)"** (ou crie o usuário diretamente em `Authentication -> Users` no painel do Supabase com o e-mail `beaverstraining@gmail.com` e uma senha forte).
+3. Ao autenticar com `beaverstraining@gmail.com`, a aplicação invoca `public.bootstrap_platform_owner_by_email()`, que verifica no servidor (`auth.jwt() ->> 'email'`) que o e-mail é estritamente `beaverstraining@gmail.com` e promove `profiles.is_platform_admin = true`, registrando o evento em `platform_audit_logs`.
