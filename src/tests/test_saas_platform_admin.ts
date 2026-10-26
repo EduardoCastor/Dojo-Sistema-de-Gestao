@@ -34,8 +34,9 @@ async function runAllTests() {
     id: 'user-superadmin',
     tenantId: 'platform',
     name: 'Carlos Gestor SaaS',
-    email: 'admin@tatamehub.com.br',
+    email: 'admin@tatameclub.com.br',
     role: 'superadmin',
+    phone: '(11) 99999-0000',
     active: true,
   };
 
@@ -92,6 +93,7 @@ async function runAllTests() {
     cycleMultiplier: 1,
     trialDays: 0,
     maxStudents: 1000,
+    maxUsers: 50,
     maxBranches: 10,
     maxStorageGb: 100,
     features: {

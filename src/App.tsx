@@ -345,25 +345,44 @@ export default function App() {
   useEffect(() => {
     if (!isSupabaseConfigured() || !supabase) return;
 
+    const handleSessionUser = async (sessionUser: any) => {
+      const userEmail = (sessionUser.email || '').trim().toLowerCase();
+      if (isAuthorizedPlatformOwnerEmail(userEmail)) {
+        const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+          id: sessionUser.id,
+          email: userEmail,
+          name: sessionUser.user_metadata?.full_name,
+        });
+        if (verification.authorized && verification.user) {
+          setUsers(DataStore.getUsers());
+          setCurrentUserId(verification.user.id);
+          if (detectEnvironmentMode() === 'saas_admin_panel') {
+            setCurrentView('superadmin');
+          }
+          return;
+        }
+      }
+
+      const memberships = await authService.loadUserMemberships(sessionUser.id);
+      if (memberships.length > 0) {
+        applyMembershipContext(sessionUser, memberships);
+      }
+    };
+
     // Verificar sessão existente ao carregar o aplicativo
     authService.getSession().then(async (session) => {
       if (session?.user) {
-        const memberships = await authService.loadUserMemberships(session.user.id);
-        if (memberships.length > 0) {
-          applyMembershipContext(session.user, memberships);
-        }
+        await handleSessionUser(session.user);
       }
     });
 
     // Escutar eventos de login/logout em tempo real
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        const memberships = await authService.loadUserMemberships(session.user.id);
-        if (memberships.length > 0) {
-          applyMembershipContext(session.user, memberships);
-        }
+        await handleSessionUser(session.user);
       } else if (event === 'SIGNED_OUT') {
-        setCurrentView('public');
+        setCurrentUserId('');
+        setCurrentView(detectEnvironmentMode() === 'saas_admin_panel' ? 'superadmin' : 'public');
       }
     });
 
@@ -459,6 +478,13 @@ export default function App() {
     setCurrentTenantId(primary.tenant_id);
     if (primary.branch_id) setCurrentBranchId(primary.branch_id);
     setCurrentUserId(user.id);
+
+    // Se o usuário estiver tentando acessar o domínio/rota do Painel Global SaaS com uma conta de academia,
+    // manter currentView === 'superadmin' para que PlatformAdminAuthView exiba o bloqueio 403 sem loop de redirecionamento.
+    if (detectEnvironmentMode() === 'saas_admin_panel') {
+      setCurrentView('superadmin');
+      return;
+    }
 
     if (primary.role === 'student') {
       setCurrentView('student_portal');

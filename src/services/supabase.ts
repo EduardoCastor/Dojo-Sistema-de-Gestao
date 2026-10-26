@@ -11,7 +11,22 @@ const getEnvVar = (key: string): string | undefined => {
   return undefined;
 };
 
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+/**
+ * Normaliza a URL base do projeto Supabase removendo sufixos acidentais como
+ * `/rest/v1/`, `/auth/v1/` ou barras finais que causariam erro HTTP 404 (PGRST125)
+ * ao concatenar os endpoints internos do SDK `@supabase/supabase-js`.
+ */
+export const normalizeSupabaseUrl = (rawUrl?: string): string | undefined => {
+  if (!rawUrl) return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return undefined;
+  return trimmed
+    .replace(/\/(rest|auth|storage|functions)\/v1\/?$/i, '')
+    .replace(/\/+$/, '');
+};
+
+const rawSupabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+export const supabaseUrl = normalizeSupabaseUrl(rawSupabaseUrl);
 const supabaseKey = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY') || getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 // Validação de configuração
@@ -94,7 +109,7 @@ export const authService = {
     });
   },
 
-  async signUpWithEmail(email: string, password: string, fullName: string) {
+  async signUpWithEmail(email: string, password: string, fullName: string, emailRedirectTo?: string) {
     if (!supabase) {
       throw new Error('Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY.');
     }
@@ -102,6 +117,7 @@ export const authService = {
       email: email.trim(),
       password,
       options: {
+        emailRedirectTo,
         data: {
           full_name: fullName,
         },
@@ -114,12 +130,14 @@ export const authService = {
     return await supabase.auth.signOut();
   },
 
-  async resetPasswordForEmail(email: string) {
+  async resetPasswordForEmail(email: string, redirectTo?: string) {
     if (!supabase) {
       throw new Error('Supabase não configurado.');
     }
+    const targetRedirect =
+      redirectTo || (typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : 'https://tatameclub.com.br/reset-password');
     return await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: targetRedirect,
     });
   },
 

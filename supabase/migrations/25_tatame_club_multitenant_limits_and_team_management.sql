@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Migration 25: Reestruturação Tatame Club — Limites por Licença (Usuários e
 --              Filiais), Gestão de Equipe da Academia, Isolamento Estrito e
---              Bootstrap Seguro do Administrador Global (beaverstraining@gmail.com)
+--              Bootstrap Seguro do Administrador Global (admin@tatameclub.com.br)
 -- PROJETO: Tatame Club (anteriormente TatameHub)
 -- ============================================================================
 -- OBJETIVO:
@@ -17,8 +17,8 @@
 --     e modalidades iniciais de forma transacional e isolada.
 --  5. Impedir que administradores de academia alterem sua própria licença/status
 --     na tabela tenants ou promovam a si mesmos a is_platform_admin.
---  6. Disponibilizar procedimento seguro de bootstrap para beaverstraining@gmail.com
---     sem qualquer senha fixa em código ou banco.
+--  6. Disponibilizar procedimento seguro de bootstrap para admin@tatameclub.com.br
+--     sem qualquer senha fixa em código ou banco e sem exposição a chamadas anônimas.
 -- ============================================================================
 
 -- 1. EVOLUÇÃO DE SCHEMA: LIMITES DE USUÁRIOS NOS PLANOS E POR ASSINATURA
@@ -643,15 +643,62 @@ BEGIN
 END;
 $$;
 
--- 10. PROCEDIMENTO SEGURO DE BOOTSTRAP DO ADMINISTRADOR GLOBAL (beaverstraining@gmail.com)
+-- Sobrecarga compatível com chamada direta por tenant_id (5 argumentos)
+CREATE OR REPLACE FUNCTION public.admin_update_license_limits(
+  p_tenant_id uuid,
+  p_custom_max_users integer,
+  p_custom_max_branches integer,
+  p_custom_max_students integer,
+  p_reason text DEFAULT 'Ajuste de limites pelo proprietário do SaaS'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_actor_name text;
+  v_tenant_name text;
+BEGIN
+  IF NOT public.is_platform_admin() THEN
+    RAISE EXCEPTION 'Acesso negado: apenas o Administrador Global do Tatame Club pode configurar limites de licenças.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT full_name INTO v_actor_name FROM public.profiles WHERE id = auth.uid();
+  SELECT trade_name INTO v_tenant_name FROM public.tenants WHERE id = p_tenant_id;
+
+  UPDATE public.saas_subscriptions
+  SET custom_max_users = CASE WHEN p_custom_max_users IS NOT NULL AND p_custom_max_users > 0 THEN p_custom_max_users ELSE NULL END,
+      custom_max_branches = CASE WHEN p_custom_max_branches IS NOT NULL AND p_custom_max_branches > 0 THEN p_custom_max_branches ELSE NULL END,
+      custom_max_students = CASE WHEN p_custom_max_students IS NOT NULL AND p_custom_max_students > 0 THEN p_custom_max_students ELSE NULL END,
+      updated_at = now()
+  WHERE tenant_id = p_tenant_id;
+
+  INSERT INTO public.platform_audit_logs (
+    actor_user_id, actor_user_name, action, entity_type, entity_id, tenant_id, tenant_name, reason, details
+  ) VALUES (
+    auth.uid(), COALESCE(v_actor_name, 'SuperAdmin'), 'change_subscription_plan', 'subscription', p_tenant_id::text, p_tenant_id, v_tenant_name, p_reason,
+    format('Limites individuais da licença da academia "%s" ajustados: máx. %s usuários, %s filiais, %s alunos.',
+      COALESCE(v_tenant_name, p_tenant_id::text),
+      COALESCE(p_custom_max_users::text, 'padrão'),
+      COALESCE(p_custom_max_branches::text, 'padrão'),
+      COALESCE(p_custom_max_students::text, 'padrão'))
+  );
+
+  RETURN jsonb_build_object('success', true);
+END;
+$$;
+
+-- 10. PROCEDIMENTO SEGURO DE BOOTSTRAP DO ADMINISTRADOR GLOBAL (admin@tatameclub.com.br)
 -- IMPORTANTE:
 --  - Não contém senha fixa nem cria credenciais padrão.
---  - Permite o bootstrap inicial apenas para o e-mail oficial beaverstraining@gmail.com
---    quando ainda não existe nenhum is_platform_admin = true no banco, ou quando executado
---    pelo próprio beaverstraining@gmail.com / SQL Editor (postgres / service_role).
---  - Confirma automaticamente email_confirmed_at para beaverstraining@gmail.com.
+--  - NUNCA pode ser invocado por visitantes anônimos (REVOKE EXECUTE FROM anon, public).
+--  - Permite o bootstrap apenas para o e-mail oficial admin@tatameclub.com.br
+--    quando executado via SQL Editor / service_role ou pelo próprio admin@tatameclub.com.br
+--    autenticado e com identidade verificada.
 CREATE OR REPLACE FUNCTION public.bootstrap_platform_owner_by_email(
-  p_email text DEFAULT 'beaverstraining@gmail.com',
+  p_email text DEFAULT 'admin@tatameclub.com.br',
   p_reason text DEFAULT 'Bootstrap inicial do proprietário da plataforma Tatame Club'
 )
 RETURNS jsonb
@@ -663,42 +710,61 @@ DECLARE
   v_target_user record;
   v_has_existing_admin boolean := false;
   v_jwt_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  v_caller_role text := coalesce(current_setting('role', true), current_user);
+  v_is_privileged_context boolean := v_caller_role IN ('service_role', 'postgres', 'supabase_admin');
+  v_normalized_email text := lower(trim(coalesce(p_email, 'admin@tatameclub.com.br')));
 BEGIN
+  -- Serializar operação de bootstrap para impedir chamadas concorrentes
+  PERFORM pg_advisory_xact_lock(hashtext('platform_owner_bootstrap_lock'));
+
+  -- Impedir chamadas anônimas
+  IF NOT v_is_privileged_context AND auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: chamadas anônimas não podem executar o bootstrap do proprietário global.'
+      USING ERRCODE = '42501';
+  END IF;
+
   -- Apenas o e-mail oficial do proprietário pode receber bootstrap
-  IF lower(trim(p_email)) <> 'beaverstraining@gmail.com' THEN
-    RAISE EXCEPTION 'Operação negada: o bootstrap global é exclusivo para beaverstraining@gmail.com.'
+  IF v_normalized_email <> 'admin@tatameclub.com.br' THEN
+    RAISE EXCEPTION 'Operação negada: o bootstrap global é exclusivo para admin@tatameclub.com.br.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- Se chamado via sessão autenticada comum (não service_role/postgres), o usuário autenticado DEVE ser o próprio admin@tatameclub.com.br
+  IF NOT v_is_privileged_context AND v_jwt_email <> 'admin@tatameclub.com.br' AND NOT public.is_platform_admin() THEN
+    RAISE EXCEPTION 'Violação de segurança: um usuário comum não pode promover a si mesmo ou terceiros a Administrador Global.'
       USING ERRCODE = '42501';
   END IF;
 
   SELECT EXISTS (
-    SELECT 1 FROM public.profiles WHERE is_platform_admin = true
+    SELECT 1
+    FROM public.profiles p
+    JOIN auth.users u ON u.id = p.id
+    WHERE p.is_platform_admin = true
+      AND lower(u.email) = 'admin@tatameclub.com.br'
   ) INTO v_has_existing_admin;
-
-  -- Se já existir um admin global configurado, exigir contexto privilegiado ou o próprio beaverstraining@gmail.com autenticado
-  IF v_has_existing_admin
-     AND current_setting('role', true) NOT IN ('service_role', 'postgres', 'supabase_admin')
-     AND NOT public.is_platform_admin()
-     AND v_jwt_email <> 'beaverstraining@gmail.com' THEN
-    RAISE EXCEPTION 'Operação restrita: o Administrador Global já foi inicializado. Execute alterações pelo SQL Editor ou autenticado como beaverstraining@gmail.com.'
-      USING ERRCODE = '42501';
-  END IF;
 
   SELECT id, email, email_confirmed_at, raw_user_meta_data
   INTO v_target_user
   FROM auth.users
-  WHERE lower(email) = 'beaverstraining@gmail.com'
+  WHERE lower(email) = 'admin@tatameclub.com.br'
   LIMIT 1;
 
   IF v_target_user.id IS NULL THEN
-    RAISE EXCEPTION 'A conta "beaverstraining@gmail.com" ainda não existe em auth.users. Utilize a aba "Primeiro Acesso" na tela do painel para definir sua senha antes de vincular o papel global.';
+    RAISE EXCEPTION 'A conta "admin@tatameclub.com.br" ainda não existe em auth.users. Crie a conta em Authentication -> Users no Supabase Dashboard ou pelo fluxo seguro de primeiro acesso antes de vincular o papel global.';
   END IF;
 
-  -- Auto-confirmar o e-mail de beaverstraining@gmail.com caso ainda não esteja confirmado
+  -- Em contexto administrativo (SQL Editor / service_role), confirmar o e-mail caso pendente.
+  -- Em sessão cliente, exigir que o e-mail já esteja confirmado para evitar tomada de conta não verificada.
   IF v_target_user.email_confirmed_at IS NULL THEN
-    UPDATE auth.users
-    SET email_confirmed_at = now(),
-        updated_at = now()
-    WHERE id = v_target_user.id;
+    IF v_is_privileged_context THEN
+      UPDATE auth.users
+      SET email_confirmed_at = now(),
+          updated_at = now()
+      WHERE id = v_target_user.id;
+    ELSE
+      RAISE EXCEPTION 'O endereço admin@tatameclub.com.br aguarda confirmação de e-mail. Confirme pelo link enviado para a caixa de entrada oficial ou execute o bootstrap no SQL Editor do Supabase.'
+        USING ERRCODE = '42501';
+    END IF;
   END IF;
 
   -- Garantir perfil e ativar a flag is_platform_admin
@@ -713,35 +779,40 @@ BEGIN
   SET is_platform_admin = true,
       updated_at = now();
 
-  -- Registrar evento crítico na trilha de auditoria da plataforma
-  INSERT INTO public.platform_audit_logs (
-    actor_user_id,
-    actor_user_name,
-    action,
-    entity_type,
-    entity_id,
-    reason,
-    details,
-    metadata
-  ) VALUES (
-    v_target_user.id,
-    COALESCE(v_target_user.email, 'beaverstraining@gmail.com'),
-    'change_plan_status',
-    'gateway',
-    v_target_user.id::text,
-    p_reason,
-    format('Privilégio de Proprietário Global (is_platform_admin = true) vinculado com segurança à conta %s.', v_target_user.email),
-    jsonb_build_object('bootstrapped_email', v_target_user.email, 'email_confirmed', true)
-  );
+  -- Registrar evento na trilha de auditoria apenas quando o vínculo é efetivado pela primeira vez ou atualizado por admin
+  IF NOT v_has_existing_admin THEN
+    INSERT INTO public.platform_audit_logs (
+      actor_user_id,
+      actor_user_name,
+      action,
+      entity_type,
+      entity_id,
+      reason,
+      details,
+      metadata
+    ) VALUES (
+      v_target_user.id,
+      COALESCE(v_target_user.email, 'admin@tatameclub.com.br'),
+      'bootstrap_platform_owner',
+      'user',
+      v_target_user.id::text,
+      p_reason,
+      format('Privilégio de Proprietário Global (is_platform_admin = true) vinculado com segurança à conta %s.', v_target_user.email),
+      jsonb_build_object('bootstrapped_email', v_target_user.email, 'context', v_caller_role)
+    );
+  END IF;
 
   RETURN jsonb_build_object(
     'success', true,
     'user_id', v_target_user.id,
     'email', v_target_user.email,
-    'is_platform_admin', true
+    'is_platform_admin', true,
+    'already_bootstrapped', v_has_existing_admin
   );
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.bootstrap_platform_owner_by_email(text, text) TO anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.bootstrap_platform_owner_by_email(text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bootstrap_platform_owner_by_email(text, text) TO authenticated, service_role;
+
 

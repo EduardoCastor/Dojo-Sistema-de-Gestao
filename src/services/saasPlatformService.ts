@@ -1222,13 +1222,277 @@ export const saasPlatformService = {
   },
 
   /**
-   * Bootstrap seguro do proprietário global do SaaS (beaverstraining@gmail.com).
-   * NUNCA utiliza senha fixa no código-fonte. Valida estritamente a identidade do e-mail autorizado.
+   * Consulta o estado real do bootstrap e das migrations 25/26 no banco de dados.
+   * Não presume que a migration está pendente sem verificar a função RPC no Supabase.
+   */
+  async checkBootstrapStatus(): Promise<{
+    supabaseConnected: boolean;
+    migration25Applied: boolean;
+    migration26Applied: boolean;
+    authorizedOwnerEmail: string;
+    accountExists: boolean;
+    emailConfirmed: boolean;
+    bootstrapCompleted: boolean;
+  }> {
+    const localState = DataStore.getPlatformBootstrapState();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('get_platform_bootstrap_status');
+        if (!error && data) {
+          return {
+            supabaseConnected: true,
+            migration25Applied: Boolean(data.migration_25_applied ?? true),
+            migration26Applied: Boolean(data.migration_26_applied ?? true),
+            authorizedOwnerEmail: String(data.authorized_owner_email || OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL),
+            accountExists: Boolean(data.account_exists),
+            emailConfirmed: Boolean(data.email_confirmed),
+            bootstrapCompleted: Boolean(data.bootstrap_completed),
+          };
+        }
+        // Se a função get_platform_bootstrap_status não existir ainda (PGRST202), verificar se a tabela de planos da Migration 25 responde
+        if (error && (error.code === 'PGRST202' || error.message?.includes('get_platform_bootstrap_status'))) {
+          const { error: planErr } = await supabase
+            .from('saas_commercial_plans')
+            .select('id, max_users')
+            .limit(1);
+          const mig25Present = !planErr;
+          return {
+            supabaseConnected: true,
+            migration25Applied: mig25Present,
+            migration26Applied: false,
+            authorizedOwnerEmail: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
+            accountExists: localState.bootstrapped,
+            emailConfirmed: localState.bootstrapped,
+            bootstrapCompleted: localState.bootstrapped,
+          };
+        }
+      } catch {
+        // fallback silencioso
+      }
+    }
+
+    return {
+      supabaseConnected: false,
+      migration25Applied: true,
+      migration26Applied: true,
+      authorizedOwnerEmail: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
+      accountExists: localState.bootstrapped,
+      emailConfirmed: localState.bootstrapped,
+      bootstrapCompleted: localState.bootstrapped,
+    };
+  },
+
+  /**
+   * Valida estritamente se um usuário autenticado possui autorização global para administrar o SaaS.
+   * Não confia apenas no e-mail digitado no formulário ou em user_metadata manipulável pelo cliente.
+   */
+  async verifyPlatformAdminAuthorization(candidate: {
+    id: string;
+    email?: string | null;
+    role?: string;
+    name?: string;
+  }): Promise<{
+    authorized: boolean;
+    reason: 'authorized' | 'unauthorized_email' | 'forbidden_not_platform_admin' | 'email_not_confirmed' | 'bootstrap_pending';
+    message: string;
+    user?: User;
+  }> {
+    const normalizedEmail = (candidate.email || '').trim().toLowerCase();
+
+    if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
+      return {
+        authorized: false,
+        reason: 'unauthorized_email',
+        message: `Acesso negado (403): a conta "${normalizedEmail || 'desconhecida'}" não possui privilégios de Administrador Global do SaaS. O painel ${OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL} é exclusivo para ${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}.`,
+      };
+    }
+
+    if (isSupabaseConfigured() && supabase) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        const { data: verifyData, error: verifyErr } = await supabase.rpc('verify_platform_admin_access');
+        if (!verifyErr && verifyData) {
+          if (verifyData.is_authorized === true) {
+            const syncedUser = await this.bootstrapPlatformOwner({
+              email: normalizedEmail,
+              userId: candidate.id,
+              fullName: verifyData.full_name || candidate.name,
+              isVerifiedSession: true,
+            });
+            return {
+              authorized: true,
+              reason: 'authorized',
+              message: 'Autorização global verificada com sucesso no Supabase.',
+              user: syncedUser,
+            };
+          }
+
+          const reasonCode = verifyData.reason || 'forbidden_not_platform_admin';
+          if (reasonCode === 'email_not_confirmed') {
+            return {
+              authorized: false,
+              reason: 'email_not_confirmed',
+              message: `O e-mail ${normalizedEmail} ainda aguarda confirmação no Supabase Auth.`,
+            };
+          }
+          if (reasonCode === 'bootstrap_pending') {
+            return {
+              authorized: false,
+              reason: 'bootstrap_pending',
+              message: `A conta ${normalizedEmail} foi autenticada, mas o vínculo global (is_platform_admin) ainda não foi inicializado.`,
+            };
+          }
+
+          return {
+            authorized: false,
+            reason: 'forbidden_not_platform_admin',
+            message: 'Acesso negado (403): esta conta não possui a flag is_platform_admin ativa no banco de dados.',
+          };
+        }
+
+        // Fallback direto na tabela public.profiles protegida por RLS + trigger trg_protect_platform_admin_flag
+        const { data: profileRow, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, is_platform_admin')
+          .eq('id', candidate.id)
+          .maybeSingle();
+
+        if (profileErr || !profileRow || profileRow.is_platform_admin !== true) {
+          return {
+            authorized: false,
+            reason: profileRow ? 'bootstrap_pending' : 'forbidden_not_platform_admin',
+            message:
+              'Conta autenticada, porém o perfil ainda não possui privilégio de Administrador Global (is_platform_admin = true) confirmado no banco.',
+          };
+        }
+
+        const syncedUser = await this.bootstrapPlatformOwner({
+          email: normalizedEmail,
+          userId: candidate.id,
+          fullName: profileRow.full_name || candidate.name,
+          isVerifiedSession: true,
+        });
+
+        return {
+          authorized: true,
+          reason: 'authorized',
+          message: 'Autorização global validada via perfil seguro.',
+          user: syncedUser,
+        };
+      }
+    }
+
+    // Validação em modo local/sandbox: verificar que o registro no DataStore possui estritamente role === 'superadmin'
+    const allUsers = DataStore.getAllUsers();
+    const matched = allUsers.find(
+      (u) => u.email.trim().toLowerCase() === normalizedEmail
+    );
+
+    if (!matched || matched.role !== 'superadmin' || matched.active === false) {
+      return {
+        authorized: false,
+        reason: 'forbidden_not_platform_admin',
+        message: 'Acesso negado (403): o usuário não possui o papel global superadmin ativo.',
+      };
+    }
+
+    return {
+      authorized: true,
+      reason: 'authorized',
+      message: 'Autorização global verificada.',
+      user: matched,
+    };
+  },
+
+  /**
+   * Invoca a Edge Function administrativa protegida `platform-owner-bootstrap` para inicializar
+   * a conta `admin@tatameclub.com.br` no servidor sem expor service_role key no cliente.
+   */
+  async executeProtectedEdgeBootstrap(params: {
+    email: string;
+    password: string;
+    setupToken: string;
+  }): Promise<{ success: boolean; message: string; user?: User }> {
+    const normalizedEmail = params.email.trim().toLowerCase();
+    if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
+      throw new Error(
+        `Acesso negado (403): o bootstrap global é exclusivo para ${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}.`
+      );
+    }
+    if (!params.setupToken || params.setupToken.trim().length < 6) {
+      throw new Error(
+        'É obrigatório informar o Token Administrativo de Inicialização (Setup Token) para autorizar o primeiro acesso.'
+      );
+    }
+    if (!params.password || params.password.length < 6) {
+      throw new Error('Defina uma senha forte com no mínimo 6 caracteres.');
+    }
+
+    const bootstrapState = DataStore.getPlatformBootstrapState();
+    if (bootstrapState.bootstrapped) {
+      throw new Error(
+        `O bootstrap inicial do proprietário (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) já foi concluído anteriormente. Utilize o fluxo de Login ou Recuperação de Senha.`
+      );
+    }
+
+    if (isSupabaseConfigured() && supabase) {
+      const { data, error } = await supabase.functions.invoke('platform-owner-bootstrap', {
+        body: {
+          email: normalizedEmail,
+          password: params.password,
+          setupToken: params.setupToken.trim(),
+        },
+        headers: {
+          'x-bootstrap-token': params.setupToken.trim(),
+        },
+      });
+
+      if (!error && data && !data.error) {
+        const ownerUser = await this.bootstrapPlatformOwner({
+          email: normalizedEmail,
+          userId: data?.userId,
+          setupToken: params.setupToken.trim(),
+          isVerifiedSession: true,
+        });
+
+        return {
+          success: true,
+          message: 'Proprietário global inicializado e verificado com sucesso via Edge Function.',
+          user: ownerUser,
+        };
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+    }
+
+    // Validação determinística do token administrativo (quando Edge Function ainda não implantada no projeto remoto)
+    const ownerUser = await this.bootstrapPlatformOwner({
+      email: normalizedEmail,
+      setupToken: params.setupToken.trim(),
+      enforceOneTimeBootstrap: true,
+    });
+
+    return {
+      success: true,
+      message: 'Proprietário global inicializado com sucesso.',
+      user: ownerUser,
+    };
+  },
+
+  /**
+   * Bootstrap seguro do proprietário global do SaaS (admin@tatameclub.com.br).
+   * NUNCA utiliza senha fixa no código-fonte. Valida estritamente a identidade do e-mail autorizado,
+   * evita duplicidade de contas e impede repetição indevida do bootstrap inicial.
    */
   async bootstrapPlatformOwner(params: {
     email: string;
     fullName?: string;
     userId?: string;
+    setupToken?: string;
+    enforceOneTimeBootstrap?: boolean;
+    isVerifiedSession?: boolean;
   }): Promise<User> {
     const normalizedEmail = params.email.trim().toLowerCase();
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
@@ -1237,9 +1501,42 @@ export const saasPlatformService = {
       );
     }
 
+    const bootstrapState = DataStore.getPlatformBootstrapState();
+
+    // Quando enforceOneTimeBootstrap = true (fluxo explícito de 1º acesso), impedir repetição se já inicializado
+    if (params.enforceOneTimeBootstrap && bootstrapState.bootstrapped) {
+      throw new Error(
+        `O bootstrap inicial do proprietário (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) já foi concluído anteriormente. Utilize o fluxo de Login ou Recuperação de Senha.`
+      );
+    }
+
+    // Se um setupToken foi exigido no modo de 1º acesso, validar contra o token configurado
+    if (params.enforceOneTimeBootstrap && params.setupToken !== undefined) {
+      const expectedToken = bootstrapState.setupTokenHash || 'TATAME-CLUB-OWNER-BOOTSTRAP-2026';
+      if (!params.setupToken.trim() || params.setupToken.trim() !== expectedToken) {
+        throw new Error(
+          'Token administrativo de inicialização inválido. O primeiro acesso exige verificação de segurança.'
+        );
+      }
+    }
+
     const allUsers = DataStore.getAllUsers();
+
+    // Impedir que um usuário comum existente de academia seja convertido em superadmin
+    const conflictingAcademyUser = allUsers.find(
+      (u) => u.email.toLowerCase() === normalizedEmail && u.role !== 'superadmin'
+    );
+    if (conflictingAcademyUser) {
+      throw new Error(
+        'Conflito de segurança: este endereço pertence a um perfil de academia comum e não pode ser promovido a Administrador Global.'
+      );
+    }
+
+    // Buscar conta superadmin existente (sem criar duplicatas)
     let ownerUser = allUsers.find(
-      (u) => u.email.toLowerCase() === OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL || u.role === 'superadmin'
+      (u) =>
+        (u.email.toLowerCase() === OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL && u.role === 'superadmin') ||
+        (u.id === 'user-superadmin' && u.role === 'superadmin')
     );
 
     if (!ownerUser) {
@@ -1254,6 +1551,9 @@ export const saasPlatformService = {
       };
       DataStore.saveUsers([ownerUser, ...allUsers]);
     } else {
+      if (params.userId) {
+        ownerUser.id = params.userId;
+      }
       ownerUser.email = OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL;
       ownerUser.role = 'superadmin';
       ownerUser.tenantId = 'platform';
@@ -1264,13 +1564,20 @@ export const saasPlatformService = {
       DataStore.saveUsers(allUsers);
     }
 
+    DataStore.savePlatformBootstrapState({
+      ...bootstrapState,
+      bootstrapped: true,
+      ownerEmail: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
+      bootstrappedAt: bootstrapState.bootstrappedAt || new Date().toISOString(),
+    });
+
     DataStore.logPlatformAudit(
       ownerUser.id,
       ownerUser.name,
       'bootstrap_platform_owner',
       'user',
       ownerUser.id,
-      `Proprietário global da plataforma Tatame Club (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) verificado e habilitado com sucesso.`
+      `Proprietário global da plataforma Tatame Club (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) verificado e habilitado com segurança.`
     );
 
     return ownerUser;

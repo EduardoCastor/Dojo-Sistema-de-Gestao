@@ -1,8 +1,23 @@
-import React, { useState } from 'react';
-import { ShieldAlert, Lock, Mail, KeyRound, ArrowLeft, CheckCircle2, Globe } from 'lucide-react';
-import { isSupabaseConfigured, supabase } from '../../services/supabase';
+import React, { useState, useEffect } from 'react';
+import {
+  ShieldAlert,
+  Lock,
+  Mail,
+  KeyRound,
+  ArrowLeft,
+  CheckCircle2,
+  Globe,
+  ShieldCheck,
+  RefreshCw,
+  AlertTriangle,
+} from 'lucide-react';
+import { isSupabaseConfigured, supabase, authService } from '../../services/supabase';
 import { saasPlatformService } from '../../services/saasPlatformService';
-import { OFFICIAL_DOMAINS, isAuthorizedPlatformOwnerEmail } from '../../utils/domainConfig';
+import {
+  OFFICIAL_DOMAINS,
+  isAuthorizedPlatformOwnerEmail,
+  getAuthRedirectUrl,
+} from '../../utils/domainConfig';
 import { User } from '../../types';
 import brandEmblem from '../../assets/images/tatame_brand_emblem_1792068009123.jpg';
 
@@ -12,42 +27,137 @@ interface PlatformAdminAuthViewProps {
   onReturnToMainSite: () => void;
 }
 
+type AuthTabMode = 'login' | 'bootstrap' | 'recovery' | 'update_password';
+
 export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
   currentUser,
   onAuthenticatedSuperAdmin,
   onReturnToMainSite,
 }) => {
-  const [email, setEmail] = useState(OFFICIAL_DOMAINS.platformOwnerEmail);
-  const [password, setPassword] = useState('');
-  const [mode, setMode] = useState<'login' | 'bootstrap'>('login');
+  const [email, setEmail] = useState<string>(OFFICIAL_DOMAINS.platformOwnerEmail);
+  const [password, setPassword] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [setupToken, setSetupToken] = useState<string>('');
+  const [bootstrapMethod, setBootstrapMethod] = useState<'email_verification' | 'token_bootstrap'>(
+    'email_verification'
+  );
+  const [mode, setMode] = useState<AuthTabMode>('login');
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(false);
 
-  // If user is logged in as a regular academy user, block access explicitly
-  const isUnauthorizedLoggedUser =
-    currentUser && (currentUser.role !== 'superadmin' || !isAuthorizedPlatformOwnerEmail(currentUser.email));
+  const [bootstrapStatus, setBootstrapStatus] = useState<{
+    checked: boolean;
+    supabaseConnected: boolean;
+    migration25Applied: boolean;
+    migration26Applied: boolean;
+    accountExists: boolean;
+    emailConfirmed: boolean;
+    bootstrapCompleted: boolean;
+  }>({
+    checked: false,
+    supabaseConnected: isSupabaseConfigured(),
+    migration25Applied: true,
+    migration26Applied: true,
+    accountExists: false,
+    emailConfirmed: false,
+    bootstrapCompleted: false,
+  });
+
+  // Se o usuário estiver logado como membro comum de uma academia, bloquear explicitamente
+  const isUnauthorizedLoggedUser = Boolean(
+    currentUser &&
+      currentUser.id &&
+      (currentUser.role !== 'superadmin' || !isAuthorizedPlatformOwnerEmail(currentUser.email))
+  );
+
+  // Verificar estado real do banco e detectar retorno de link de recuperação/confirmação do Supabase Auth
+  useEffect(() => {
+    let isMounted = true;
+
+    async function inspectEnvironment() {
+      const status = await saasPlatformService.checkBootstrapStatus();
+      if (!isMounted) return;
+      setBootstrapStatus({
+        checked: true,
+        ...status,
+      });
+    }
+
+    inspectEnvironment();
+
+    if (isSupabaseConfigured() && supabase) {
+      const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (!isMounted) return;
+        if (event === 'PASSWORD_RECOVERY') {
+          setMode('update_password');
+          setInfoMessage(
+            `Sessão de redefinição de senha validada para ${OFFICIAL_DOMAINS.platformOwnerEmail}. Defina sua nova senha abaixo.`
+          );
+          setError(null);
+        } else if (event === 'SIGNED_IN' && session?.user && supabase) {
+          const userEmail = (session.user.email || '').trim().toLowerCase();
+          if (isAuthorizedPlatformOwnerEmail(userEmail) && session.user.email_confirmed_at) {
+            // Se acabou de confirmar o e-mail oficial pelo link recebido, vincular papel global se necessário
+            await supabase.rpc('bootstrap_platform_owner_by_email', {
+              p_email: userEmail,
+            });
+            const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+              id: session.user.id,
+              email: userEmail,
+              name: session.user.user_metadata?.full_name,
+            });
+            if (verification.authorized && verification.user && isMounted) {
+              onAuthenticatedSuperAdmin(verification.user);
+            }
+          }
+        }
+      });
+
+      return () => {
+        isMounted = false;
+        listener?.subscription?.unsubscribe();
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleLocalSandboxAccess = async () => {
     setError(null);
     setInfoMessage(null);
     const normalizedEmail = email.trim().toLowerCase();
+
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
       setError(
-        `Acesso negado: o Painel Global do SaaS (${OFFICIAL_DOMAINS.saasAdminHost}) é restrito exclusivamente à conta proprietária ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
+        `Acesso negado (403): o Painel Global do SaaS (${OFFICIAL_DOMAINS.saasAdminHost}) é restrito exclusivamente à conta proprietária ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
       );
       return;
     }
+
     if (password.length < 6) {
-      setError('Digite uma senha de pelo menos 6 caracteres no campo de senha acima para iniciar a sessão de teste.');
+      setError(
+        'Informe uma senha de pelo menos 6 caracteres no campo de senha para validar a sessão administrativa de homologação.'
+      );
       return;
     }
+
     setLoading(true);
     try {
-      const ownerUser = await saasPlatformService.bootstrapPlatformOwner({ email: normalizedEmail });
-      onAuthenticatedSuperAdmin(ownerUser);
+      const ownerUser = await saasPlatformService.bootstrapPlatformOwner({
+        email: normalizedEmail,
+        isVerifiedSession: true,
+      });
+      const check = await saasPlatformService.verifyPlatformAdminAuthorization(ownerUser);
+      if (!check.authorized || !check.user) {
+        setError(check.message);
+        return;
+      }
+      onAuthenticatedSuperAdmin(check.user);
     } catch (err: any) {
-      setError(err?.message || 'Erro ao iniciar modo de teste local.');
+      setError(err?.message || 'Erro ao validar acesso no ambiente de homologação.');
     } finally {
       setLoading(false);
     }
@@ -59,13 +169,93 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
     setInfoMessage(null);
 
     const normalizedEmail = email.trim().toLowerCase();
+
+    // 1. Validação estrita do endereço do proprietário global
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
       setError(
-        `Acesso negado: o Painel Global do SaaS (${OFFICIAL_DOMAINS.saasAdminHost}) é restrito exclusivamente à conta proprietária ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
+        `Acesso negado (403): o endereço "${normalizedEmail}" não possui autorização para administrar o SaaS. O painel ${OFFICIAL_DOMAINS.saasAdminHost} é exclusivo para ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
       );
       return;
     }
 
+    // 2. Fluxo de Recuperação de Senha por E-mail Oficial
+    if (mode === 'recovery') {
+      setLoading(true);
+      try {
+        if (isSupabaseConfigured() && supabase) {
+          const redirectUrl = getAuthRedirectUrl('saas_admin_panel');
+          const { error: resetErr } = await authService.resetPasswordForEmail(
+            normalizedEmail,
+            redirectUrl
+          );
+          if (resetErr) {
+            throw resetErr;
+          }
+          setInfoMessage(
+            `Link seguro de definição/recuperação de senha enviado para ${normalizedEmail}. Acesse sua caixa de entrada e clique no link para retornar a ${redirectUrl}.`
+          );
+        } else {
+          setInfoMessage(
+            `Em modo local (sem Supabase remoto configurado), utilize o acesso de homologação abaixo com o e-mail ${normalizedEmail}.`
+          );
+        }
+      } catch (err: any) {
+        setError(
+          err?.message ||
+            `Não foi possível enviar o e-mail de recuperação para ${normalizedEmail}. Verifique a configuração de SMTP no Supabase Auth.`
+        );
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // 3. Fluxo de Atualização de Senha após clicar no link de recuperação do e-mail
+    if (mode === 'update_password') {
+      if (password.length < 6) {
+        setError('A nova senha deve ter pelo menos 6 caracteres.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError('A confirmação de senha não confere.');
+        return;
+      }
+
+      setLoading(true);
+      try {
+        if (isSupabaseConfigured() && supabase) {
+          const { data: updated, error: updateErr } = await supabase.auth.updateUser({
+            password,
+          });
+          if (updateErr) {
+            throw updateErr;
+          }
+          if (updated.user) {
+            await supabase.rpc('bootstrap_platform_owner_by_email', {
+              p_email: normalizedEmail,
+            });
+            const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+              id: updated.user.id,
+              email: updated.user.email,
+              name: updated.user.user_metadata?.full_name,
+            });
+            if (verification.authorized && verification.user) {
+              onAuthenticatedSuperAdmin(verification.user);
+              return;
+            }
+          }
+          setInfoMessage('Senha atualizada com sucesso! Faça login abaixo.');
+          setMode('login');
+        }
+      } catch (err: any) {
+        setError(err?.message || 'Erro ao salvar a nova senha.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Validar senha para Login e 1º Acesso
     if (password.length < 6) {
       setError('Informe uma senha válida (mínimo de 6 caracteres).');
       return;
@@ -73,89 +263,190 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
     setLoading(true);
     try {
-      if (isSupabaseConfigured()) {
-        if (mode === 'bootstrap') {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: normalizedEmail,
-            password,
-            options: {
-              data: { full_name: 'Proprietário Tatame Club SaaS' },
-            },
-          });
-
-          if (signUpError && !signUpError.message.toLowerCase().includes('already registered')) {
-            setError(`Erro no Supabase Auth: ${signUpError.message}`);
-            return;
-          }
-
-          // Tenta promover e confirmar automaticamente a conta via RPC da Migration 25
-          await supabase.rpc('bootstrap_platform_owner_by_email');
-
-          // Tenta autenticar imediatamente após inicializar
-          const { data: signInAfterBootstrap, error: signInAfterError } =
-            await supabase.auth.signInWithPassword({
-              email: normalizedEmail,
-              password,
-            });
-
-          if (!signInAfterError && signInAfterBootstrap?.user) {
-            const ownerUser = await saasPlatformService.bootstrapPlatformOwner({
-              email: normalizedEmail,
-              userId: signInAfterBootstrap.user.id,
-            });
-            onAuthenticatedSuperAdmin(ownerUser);
-            return;
-          }
-
-          if (signUpData?.user && !signUpData.session) {
-            setInfoMessage(
-              'Conta criada no Supabase Auth! Confirme o e-mail enviado para beaverstraining@gmail.com (ou rode a Migration 25 no SQL Editor do Supabase) — ou clique no botão "Entrar em Modo de Teste Local" abaixo.'
-            );
-            setMode('login');
-            return;
-          }
-
-          setInfoMessage('Conta inicial configurada! Faça login abaixo.');
-          setMode('login');
+      // 4. Fluxo de 1º Acesso (Criar Senha e Inicializar Proprietário com Segurança)
+      if (mode === 'bootstrap') {
+        if (password !== confirmPassword) {
+          setError('A confirmação de senha não confere com a senha digitada.');
+          setLoading(false);
           return;
         }
 
-        // Modo Login: tenta promover antes caso a conta já exista mas ainda não esteja confirmada
-        await supabase.rpc('bootstrap_platform_owner_by_email');
+        // Impedir repetição indevida se o bootstrap já estiver concluído no banco
+        const currentStatus = await saasPlatformService.checkBootstrapStatus();
+        if (currentStatus.bootstrapCompleted) {
+          setError(
+            `A conta ${OFFICIAL_DOMAINS.platformOwnerEmail} já foi inicializada anteriormente como Proprietário Global. Não é permitido repetir o bootstrap. Utilize a aba "Login" ou "Recuperar Senha".`
+          );
+          setMode('login');
+          setLoading(false);
+          return;
+        }
 
+        if (bootstrapMethod === 'token_bootstrap') {
+          const result = await saasPlatformService.executeProtectedEdgeBootstrap({
+            email: normalizedEmail,
+            password,
+            setupToken,
+          });
+          if (result.user) {
+            onAuthenticatedSuperAdmin(result.user);
+            return;
+          }
+        }
+
+        if (isSupabaseConfigured() && supabase) {
+          const redirectUrl = getAuthRedirectUrl('saas_admin_panel');
+          const { data: signUpData, error: signUpError } = await authService.signUpWithEmail(
+            normalizedEmail,
+            password,
+            'Proprietário Tatame Club SaaS',
+            redirectUrl
+          );
+
+          // Caso B: Conta já existe no Supabase Auth — não criar duplicidade!
+          if (
+            signUpError &&
+            (signUpError.message.toLowerCase().includes('already registered') ||
+              signUpError.message.toLowerCase().includes('already exists'))
+          ) {
+            setInfoMessage(
+              `A conta ${normalizedEmail} já existe no Supabase Auth (nenhuma duplicata foi criada). Faça login com sua senha atual ou utilize a aba "Recuperar Senha" para receber um link seguro no e-mail ${normalizedEmail}.`
+            );
+            setMode('login');
+            setLoading(false);
+            return;
+          }
+
+          if (signUpError) {
+            setError(`Não foi possível iniciar o cadastro no Supabase Auth: ${signUpError.message}`);
+            setLoading(false);
+            return;
+          }
+
+          // Supabase retorna identities vazio quando o usuário já existe e a proteção contra enumeração está ativa
+          if (
+            signUpData?.user &&
+            Array.isArray(signUpData.user.identities) &&
+            signUpData.user.identities.length === 0
+          ) {
+            setInfoMessage(
+              `A conta ${normalizedEmail} já consta registrada no Supabase Auth. Faça login abaixo ou clique em "Recuperar Senha" para redefinir sua credencial com segurança.`
+            );
+            setMode('login');
+            setLoading(false);
+            return;
+          }
+
+          // Se o Supabase já retornou sessão ativa (ex: confirmação automática em ambiente controlado)
+          if (signUpData?.user && signUpData?.session) {
+            await supabase.rpc('bootstrap_platform_owner_by_email', {
+              p_email: normalizedEmail,
+            });
+            const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+              id: signUpData.user.id,
+              email: normalizedEmail,
+              name: 'Proprietário Tatame Club SaaS',
+            });
+            if (verification.authorized && verification.user) {
+              onAuthenticatedSuperAdmin(verification.user);
+              return;
+            }
+          }
+
+          // Fluxo padrão com confirmação de e-mail ativa no Supabase Auth
+          setInfoMessage(
+            `Solicitação de 1º acesso registrada! Para impedir que terceiros assumam a conta, um link de confirmação foi enviado para ${normalizedEmail}. Confirme no seu e-mail (ou execute "SELECT public.bootstrap_platform_owner_by_email('admin@tatameclub.com.br');" no SQL Editor do Supabase) e depois faça login.`
+          );
+          setMode('login');
+          return;
+        } else {
+          // Modo local sem Supabase remoto: exigir setupToken para testar o 1º acesso
+          const result = await saasPlatformService.executeProtectedEdgeBootstrap({
+            email: normalizedEmail,
+            password,
+            setupToken: setupToken || 'TATAME-CLUB-OWNER-BOOTSTRAP-2026',
+          });
+          if (result.user) {
+            onAuthenticatedSuperAdmin(result.user);
+          }
+          return;
+        }
+      }
+
+      // 5. Fluxo de Login Normal (Autenticação + Validação de Autorização Global no Backend)
+      if (isSupabaseConfigured() && supabase) {
         const { data, error: signInError } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
           password,
         });
 
         if (signInError) {
-          const rawMsg = signInError.message || '';
-          if (rawMsg.toLowerCase().includes('email not confirmed')) {
+          const rawMsg = (signInError.message || '').toLowerCase();
+          if (rawMsg.includes('email not confirmed')) {
             setError(
-              'A conta beaverstraining@gmail.com foi criada, mas aguarda confirmação de e-mail. Verifique sua caixa de entrada do Gmail (ou rode "SELECT public.bootstrap_platform_owner_by_email();" no SQL Editor do Supabase) ou use o botão de Teste Local abaixo.'
+              `O endereço ${normalizedEmail} já foi criado, mas aguarda confirmação de e-mail. Verifique a caixa de entrada de ${normalizedEmail} ou execute "SELECT public.bootstrap_platform_owner_by_email('admin@tatameclub.com.br');" no SQL Editor do Supabase.`
             );
+          } else if (rawMsg.includes('invalid login credentials')) {
+            const currentStatus = await saasPlatformService.checkBootstrapStatus();
+            if (currentStatus.migration26Applied && !currentStatus.accountExists) {
+              setError(
+                `A conta ${normalizedEmail} ainda não foi inicializada no Supabase Auth. Utilize a aba "1º Acesso (Criar Senha)" acima para configurar sua senha com segurança.`
+              );
+            } else {
+              setError(
+                `Credenciais inválidas para ${normalizedEmail}. Verifique a senha digitada ou utilize a aba "Recuperar Senha" para redefini-la por e-mail.`
+              );
+            }
           } else {
-            setError(
-              'Conta beaverstraining@gmail.com ainda não foi criada no Supabase Auth (ou a senha está incorreta). Clique na aba "1º Acesso (Criar Senha)" acima para cadastrar sua senha pela primeira vez.'
-            );
+            setError(`Falha na autenticação: ${signInError.message}`);
           }
           return;
         }
 
         if (data.user) {
-          await supabase.rpc('bootstrap_platform_owner_by_email');
-          const ownerUser = await saasPlatformService.bootstrapPlatformOwner({
-            email: normalizedEmail,
-            userId: data.user.id,
+          // Verificar autorização global no backend
+          let verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.user_metadata?.full_name,
           });
-          onAuthenticatedSuperAdmin(ownerUser);
+
+          // Se a conta oficial autenticou com e-mail confirmado mas ainda estava com bootstrap_pending,
+          // concluir vínculo autenticado via RPC segura e revalidar
+          if (!verification.authorized && verification.reason === 'bootstrap_pending') {
+            await supabase.rpc('bootstrap_platform_owner_by_email', {
+              p_email: normalizedEmail,
+            });
+            verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.user_metadata?.full_name,
+            });
+          }
+
+          if (!verification.authorized || !verification.user) {
+            await authService.signOut();
+            setError(verification.message);
+            return;
+          }
+
+          onAuthenticatedSuperAdmin(verification.user);
         }
       } else {
-        const ownerUser = await saasPlatformService.bootstrapPlatformOwner({ email: normalizedEmail });
-        onAuthenticatedSuperAdmin(ownerUser);
+        // Ambiente sem Supabase remoto configurado
+        const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
+          id: 'user-superadmin',
+          email: normalizedEmail,
+          name: 'Proprietário Tatame Club',
+        });
+        if (!verification.authorized || !verification.user) {
+          setError(verification.message);
+          return;
+        }
+        onAuthenticatedSuperAdmin(verification.user);
       }
     } catch (err: any) {
-      setError(err?.message || 'Erro inesperado ao autenticar no painel global.');
+      setError(err?.message || 'Erro inesperado ao validar acesso ao painel global.');
     } finally {
       setLoading(false);
     }
@@ -206,61 +497,86 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
             </p>
           </div>
 
-          {isUnauthorizedLoggedUser && (
+          {isUnauthorizedLoggedUser && currentUser && (
             <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 space-y-2">
               <div className="flex items-center gap-2 text-red-400 font-bold text-xs">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
-                <span>Acesso Bloqueado para Conta de Academia</span>
+                <span>Acesso Negado para Conta de Academia (403)</span>
               </div>
               <p className="text-xs text-red-200/90 leading-relaxed">
-                Você está autenticado como <strong>{currentUser.email}</strong> ({currentUser.role}). Administradores de
-                academias não possuem permissão para visualizar ou gerenciar tenants de terceiros.
+                Você está autenticado como <strong>{currentUser.email}</strong> (papel:{' '}
+                <code>{currentUser.role}</code>). Contas de academias não possuem autorização global para acessar{' '}
+                <strong>{OFFICIAL_DOMAINS.saasAdminHost}</strong>.
               </p>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-950 rounded-xl border border-zinc-800 text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('login');
-                setError(null);
-              }}
-              className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                mode === 'login' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              Já tenho Senha (Login)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('bootstrap');
-                setError(null);
-              }}
-              className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                mode === 'bootstrap' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              1º Acesso (Criar Senha)
-            </button>
-          </div>
+          {/* Exibir aviso de migration SOMENTE se a verificação real detectar ausência das funções no Supabase */}
+          {bootstrapStatus.checked &&
+            bootstrapStatus.supabaseConnected &&
+            (!bootstrapStatus.migration25Applied || !bootstrapStatus.migration26Applied) && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-amber-400">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Atualização de Schema Pendente no Supabase</span>
+                </div>
+                <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                  Detectamos que a função de diagnóstico da{' '}
+                  {!bootstrapStatus.migration25Applied ? 'Migration 25 e Migration 26' : 'Migration 26'} ainda não foi
+                  aplicada no banco remoto. Execute o script{' '}
+                  <code>supabase/migrations/26_fix_platform_owner_identity_and_secure_bootstrap.sql</code> no SQL Editor
+                  do Supabase.
+                </p>
+              </div>
+            )}
+
+          {mode !== 'update_password' && (
+            <div className="grid grid-cols-3 gap-1 p-1 bg-zinc-950 rounded-xl border border-zinc-800 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setError(null);
+                  setInfoMessage(null);
+                }}
+                className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                  mode === 'login' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('bootstrap');
+                  setError(null);
+                  setInfoMessage(null);
+                }}
+                className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                  mode === 'bootstrap' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                1º Acesso
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('recovery');
+                  setError(null);
+                  setInfoMessage(null);
+                }}
+                className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                  mode === 'recovery' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Recuperar Senha
+              </button>
+            </div>
+          )}
 
           {error && (
             <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed space-y-2">
               <p>{error}</p>
-              {mode === 'login' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('bootstrap');
-                    setError(null);
-                  }}
-                  className="w-full py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs transition-colors cursor-pointer"
-                >
-                  Ir para "1º Acesso (Criar Senha)" →
-                </button>
-              )}
             </div>
           )}
 
@@ -283,59 +599,146 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="beaverstraining@gmail.com"
+                  placeholder={OFFICIAL_DOMAINS.platformOwnerEmail}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
-              <p className="text-[11px] text-zinc-500 mt-1">
-                Somente <code className="text-amber-400">{OFFICIAL_DOMAINS.platformOwnerEmail}</code> possui autorização
-                de superadministrador.
+              <p className="text-[11px] text-zinc-500 mt-1 flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  Identidade global configurada:{' '}
+                  <code className="text-amber-400 font-semibold">{OFFICIAL_DOMAINS.platformOwnerEmail}</code>
+                </span>
               </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                {mode === 'bootstrap' ? 'Escolha sua Senha Forte (mín. 6 caracteres)' : 'Senha do Proprietário'}
-              </label>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                />
+            {mode === 'bootstrap' && (
+              <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2.5">
+                <span className="block text-[11px] font-semibold text-zinc-300">
+                  Método de Verificação do Proprietário:
+                </span>
+                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setBootstrapMethod('email_verification')}
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-colors cursor-pointer ${
+                      bootstrapMethod === 'email_verification'
+                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-300 font-semibold'
+                        : 'border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Confirmação por E-mail
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBootstrapMethod('token_bootstrap')}
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-colors cursor-pointer ${
+                      bootstrapMethod === 'token_bootstrap'
+                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-300 font-semibold'
+                        : 'border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Token Administrativo
+                  </button>
+                </div>
+
+                {bootstrapMethod === 'token_bootstrap' && (
+                  <div className="pt-1">
+                    <label className="block text-[11px] font-medium text-zinc-300 mb-1">
+                      Token Único de Inicialização (Setup Token)
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={setupToken}
+                      onChange={(e) => setSetupToken(e.target.value)}
+                      placeholder="Informe o PLATFORM_BOOTSTRAP_SECRET"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                )}
               </div>
-            </div>
+            )}
+
+            {mode !== 'recovery' && (
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                  {mode === 'bootstrap' || mode === 'update_password'
+                    ? 'Definir Senha Forte do Proprietário (mín. 6 caracteres)'
+                    : 'Senha do Proprietário'}
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {(mode === 'bootstrap' || mode === 'update_password') && (
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                  Confirmar Senha do Proprietário
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Repita a senha escolhida"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+            )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs tracking-wide uppercase transition-colors disabled:opacity-50 cursor-pointer"
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs tracking-wide uppercase transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
             >
-              {loading
-                ? 'Processando...'
-                : mode === 'bootstrap'
-                ? 'Criar Senha e Inicializar Proprietário'
-                : 'Acessar Painel Global do SaaS'}
+              {loading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Verificando Autorização...</span>
+                </>
+              ) : mode === 'bootstrap' ? (
+                <span>Inicializar Conta e Definir Senha</span>
+              ) : mode === 'recovery' ? (
+                <span>Enviar Link Seguro de Redefinição</span>
+              ) : mode === 'update_password' ? (
+                <span>Salvar Nova Senha e Acessar Painel</span>
+              ) : (
+                <span>Acessar Painel Global do SaaS</span>
+              )}
             </button>
           </form>
 
-          <div className="pt-4 border-t border-zinc-800/80 space-y-2">
-            <p className="text-[11px] text-zinc-400 text-center">
-              Ainda não publicou o domínio <code className="text-zinc-300">@tatameclub.com.br</code> ou ainda não rodou a Migration 25 no Supabase?
-            </p>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleLocalSandboxAccess}
-              className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold text-xs transition-colors cursor-pointer"
-            >
-              Entrar em Modo de Teste Local (Pré-Domínio)
-            </button>
-          </div>
+          {!isSupabaseConfigured() && (
+            <div className="pt-4 border-t border-zinc-800/80 space-y-2">
+              <p className="text-[11px] text-zinc-400 text-center">
+                Ambiente de Homologação Local (Supabase remoto não configurado nas variáveis de ambiente):
+              </p>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleLocalSandboxAccess}
+                className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold text-xs transition-colors cursor-pointer"
+              >
+                Validar Acesso Local ({OFFICIAL_DOMAINS.platformOwnerEmail})
+              </button>
+            </div>
+          )}
         </div>
       </main>
 

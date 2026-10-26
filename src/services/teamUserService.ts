@@ -76,6 +76,14 @@ export interface UpdateTenantUserPayload {
   active?: boolean;
 }
 
+function assertValidTenantRoleFn(role: UserRole): asserts role is Exclude<UserRole, 'superadmin'> {
+  if (role === 'superadmin' || !ALLOWED_TENANT_ROLES.includes(role as any)) {
+    throw new Error(
+      `Papel inválido ou proibido ("${role}"): administradores de academias não podem conceder privilégios globais de SuperAdmin.`
+    );
+  }
+}
+
 export const teamUserService = {
   /**
    * Valida se o ator possui permissão administrativa sobre a equipe da academia.
@@ -102,12 +110,8 @@ export const teamUserService = {
   /**
    * Valida se o papel solicitado é permitido dentro de uma academia (bloqueia 'superadmin').
    */
-  assertValidTenantRole(role: UserRole): asserts role is Exclude<UserRole, 'superadmin'> {
-    if (role === 'superadmin' || !ALLOWED_TENANT_ROLES.includes(role as any)) {
-      throw new Error(
-        `Papel inválido ou proibido ("${role}"): administradores de academias não podem conceder privilégios globais de SuperAdmin.`
-      );
-    }
+  assertValidTenantRole(role: UserRole): void {
+    assertValidTenantRoleFn(role);
   },
 
   /**
@@ -140,7 +144,7 @@ export const teamUserService = {
   ): Promise<{ user?: User; invitation?: TenantUserInvitation }> {
     return withTenantLock(payload.tenantId, async () => {
       this.assertActorCanManageTenantUsers(actor, payload.tenantId);
-      this.assertValidTenantRole(payload.role);
+      assertValidTenantRoleFn(payload.role);
 
       // branch_manager não pode criar outro owner
       if (actor.role === 'branch_manager' && payload.role === 'owner') {

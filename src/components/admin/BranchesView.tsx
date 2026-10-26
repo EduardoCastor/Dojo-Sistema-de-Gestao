@@ -144,7 +144,7 @@ export const BranchesView: React.FC<BranchesViewProps> = ({
                   <div>
                     <h3 className="text-sm font-bold text-white">{b.name}</h3>
                     <div className="text-[11px] text-slate-400">
-                      {b.isHeadquarter || b.isHeadquarters ? 'Unidade Matriz (1ª Unidade)' : 'Filial Regional'}
+                      {b.isHeadquarter ? 'Unidade Matriz (1ª Unidade)' : 'Filial Regional'}
                     </div>
                   </div>
                 </div>

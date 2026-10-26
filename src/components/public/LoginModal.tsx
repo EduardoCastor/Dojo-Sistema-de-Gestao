@@ -86,7 +86,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           return;
         }
 
-        if (matchedUser.isActive === false || matchedUser.active === false) {
+        if (matchedUser.active === false) {
           setError(
             'Seu acesso à academia encontra-se desativado pelo proprietário ou gestor. Entre em contato com a administração do seu dojo.'
           );

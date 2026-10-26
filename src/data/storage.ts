@@ -135,12 +135,26 @@ export class DataStore {
     const all = load('users', INITIAL_USERS);
     let changed = false;
     const normalized = all.map(u => {
-      if (u.role === 'superadmin' && u.email !== 'beaverstraining@gmail.com') {
+      // Migrar o registro seed user-superadmin para o endereço oficial admin@tatameclub.com.br
+      // sem excluir outras contas existentes
+      if (u.id === 'user-superadmin' && u.role === 'superadmin' && u.email !== 'admin@tatameclub.com.br') {
         changed = true;
-        return { ...u, email: 'beaverstraining@gmail.com' };
+        return { ...u, email: 'admin@tatameclub.com.br' };
       }
       return u;
     });
+    if (!normalized.some(u => u.email.toLowerCase() === 'admin@tatameclub.com.br' && u.role === 'superadmin')) {
+      changed = true;
+      normalized.unshift({
+        id: 'user-superadmin',
+        tenantId: 'platform',
+        name: 'Proprietário Tatame Club',
+        email: 'admin@tatameclub.com.br',
+        role: 'superadmin',
+        phone: '(11) 99999-0000',
+        active: true,
+      });
+    }
     if (changed) {
       save('users', normalized);
     }
@@ -149,6 +163,28 @@ export class DataStore {
 
   static saveUsers(users: User[]): void {
     save('users', users);
+  }
+
+  static getPlatformBootstrapState(): {
+    bootstrapped: boolean;
+    ownerEmail: string;
+    bootstrappedAt?: string;
+    setupTokenHash?: string;
+  } {
+    return load('platform_bootstrap_state', {
+      bootstrapped: false,
+      ownerEmail: 'admin@tatameclub.com.br',
+      setupTokenHash: 'TATAME-CLUB-OWNER-BOOTSTRAP-2026',
+    });
+  }
+
+  static savePlatformBootstrapState(state: {
+    bootstrapped: boolean;
+    ownerEmail: string;
+    bootstrappedAt?: string;
+    setupTokenHash?: string;
+  }): void {
+    save('platform_bootstrap_state', state);
   }
 
   static getTenantInvitations(tenantId?: string): TenantUserInvitation[] {

@@ -1,6 +1,6 @@
 # Tatame Club — Configuração de Domínios Oficiais, Autenticação Global e Implantação
 
-Este documento detalha as configurações externas obrigatórias para disponibilizar a plataforma **Tatame Club** em seus domínios oficiais, configurar o administrador global do SaaS (`beaverstraining@gmail.com`) com segurança e aplicar as migrations no Supabase.
+Este documento detalha as configurações externas obrigatórias para disponibilizar a plataforma **Tatame Club** em seus domínios oficiais, configurar o administrador global do SaaS (`admin@tatameclub.com.br`) com segurança e aplicar as migrations no Supabase.
 
 ---
 
@@ -12,8 +12,8 @@ A aplicação opera com separação de contexto por hostname e rota:
   - Exibe a apresentação comercial, planos com limites de alunos, usuários e unidades, cadastro de novas academias (10 dias de teste grátis) e login exclusivo da academia vinculada ao usuário autenticado.
   - **Não abre nenhum painel de demonstração compartilhado.**
 - **Painel Administrativo Exclusivo do Proprietário SaaS**: `https://painel.tatameclub.com.br` (também acessível em homologação via `/painel` ou `?env=painel`)
-  - Restrito exclusivamente ao proprietário da plataforma (`beaverstraining@gmail.com` com `is_platform_admin = true` / `role = 'superadmin'`).
-  - Bloqueia qualquer usuário de academia (`owner`, `branch_manager`, `instructor`, `receptionist`, `financial`, `student`, `guardian`).
+  - Restrito exclusivamente ao proprietário da plataforma (`admin@tatameclub.com.br` com `is_platform_admin = true` na tabela `public.profiles` e ativo em `public.platform_authorized_owners`).
+  - Bloqueia qualquer usuário de academia (`owner`, `branch_manager`, `instructor`, `secretary`, `financial`, `student`, `guardian`), mesmo que conheça a URL direta.
 
 ---
 
@@ -26,12 +26,6 @@ Configure os seguintes apontamentos DNS na zona `tatameclub.com.br`:
 | `A` | `@` | `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153` *(se GitHub Pages)* ou IP do provedor (Vercel / Cloudflare Pages / Nginx) | Automático | Domínio raiz `tatameclub.com.br` |
 | `CNAME` | `www` | `tatameclub.com.br` | Automático | Subdomínio `www.tatameclub.com.br` |
 | `CNAME` | `painel` | `tatameclub.com.br` *(ou endpoint da hospedagem)* | Automático | Subdomínio exclusivo do painel global `painel.tatameclub.com.br` |
-
-> **Observação para GitHub Pages vs. Cloudflare Pages / Vercel**:
-> - O workflow `.github/workflows/deploy.yml` foi integralmente preservado para compilação e publicação contínua.
-> - Como o GitHub Pages nativo vincula apenas um domínio customizado por repositório (`CNAME`), para responder simultaneamente a `tatameclub.com.br` e `painel.tatameclub.com.br` sobre o mesmo build SPA recomenda-se:
->   1. **Cloudflare Proxy (Orange Cloud)** na frente do GitHub Pages (com regra de Host header / Page Rule encaminhando `painel.tatameclub.com.br` para o artefato estático), **ou**
->   2. **Vercel / Cloudflare Pages** conectado ao mesmo repositório GitHub adicionando ambos os domínios (`tatameclub.com.br` e `painel.tatameclub.com.br`) ao projeto.
 
 ---
 
@@ -63,27 +57,33 @@ No painel do **Supabase** (`Authentication` → `URL Configuration`):
 
 ---
 
-## 5. Aplicação das Migrations no Supabase
+## 5. Aplicação das Migrations 25 e 26 no Supabase
 
-Execute a nova migration versionada no SQL Editor do Supabase (ou via `supabase db push`):
+Execute no **SQL Editor** do Supabase (ou via `supabase db push`):
 
-- Arquivo: `supabase/migrations/25_tatame_club_multitenant_limits_and_team_management.sql`
+1. `supabase/migrations/25_tatame_club_multitenant_limits_and_team_management.sql` *(caso ainda não tenha sido aplicada)*
+2. `supabase/migrations/26_fix_platform_owner_identity_and_secure_bootstrap.sql` *(obrigatória para migrar a autorização global para `admin@tatameclub.com.br`, criar a tabela `platform_authorized_owners` e as RPCs `get_platform_bootstrap_status` e `verify_platform_admin_access`)*
 
-Esta migration realiza de forma idempotente:
-1. Adição da coluna `max_users` em `saas_plans` e dos limites customizados (`custom_max_users`, `custom_max_branches`, `custom_max_students`) em `saas_subscriptions`.
-2. Criação da tabela `tenant_user_invitations` com RLS por tenant.
-3. Criação da função `public.get_tenant_effective_limits(p_tenant_id)` que retorna os limites efetivos (considerando plano contratado ou override individual da licença).
-4. Criação dos triggers transacionais com bloqueio `FOR UPDATE` (`trg_enforce_tenant_user_limit` e `trg_enforce_tenant_branch_limit`) impedindo que chamadas concorrentes ultrapassem o limite de usuários ativos/convidados ou o limite de unidades (onde a Unidade Matriz conta como a 1ª unidade).
-5. Criação dos triggers de segurança (`trg_protect_platform_admin_flag` e `trg_protect_tenant_license_fields`) impedindo auto-promoção para `is_platform_admin` ou adulteração de plano/status pelo cliente.
-6. Atualização de `public.register_academy_atomic` para provisionar a academia, a `Unidade Matriz` (1ª unidade) e a assinatura Trial de 10 dias completamente isoladas.
-7. Criação das RPCs `public.admin_update_license_limits` e `public.bootstrap_platform_owner_by_email`.
+### Como verificar no SQL Editor se as Migrations 25 e 26 estão ativas:
+```sql
+SELECT public.get_platform_bootstrap_status();
+```
+O retorno esperado é um JSON com `"migration_25_applied": true`, `"migration_26_applied": true` e `"authorized_owner_email": "admin@tatameclub.com.br"`.
 
 ---
 
-## 6. Inicialização Segura do Proprietário Global (`beaverstraining@gmail.com`)
+## 6. Inicialização Segura da Senha do Proprietário (`admin@tatameclub.com.br`)
 
-**Nenhuma senha foi fixada no código-fonte.** Para inicializar a conta do proprietário do SaaS em produção:
+**Nenhuma senha é armazenada no código-fonte, em migrations ou em variáveis públicas.** Existem duas formas seguras de inicializar o acesso de `admin@tatameclub.com.br`:
 
-1. Acesse `https://painel.tatameclub.com.br` (ou `/?env=painel`).
-2. Na tela de autenticação exclusiva do SaaS, selecione a aba **"1º Acesso (Criar Senha)"** (ou crie o usuário diretamente em `Authentication -> Users` no painel do Supabase com o e-mail `beaverstraining@gmail.com` e uma senha forte).
-3. Ao autenticar com `beaverstraining@gmail.com`, a aplicação invoca `public.bootstrap_platform_owner_by_email()`, que verifica no servidor (`auth.jwt() ->> 'email'`) que o e-mail é estritamente `beaverstraining@gmail.com` e promove `profiles.is_platform_admin = true`, registrando o evento em `platform_audit_logs`.
+### Procedimento A — Via E-mail Oficial `admin@tatameclub.com.br` + SQL Editor
+1. Acesse `https://painel.tatameclub.com.br` na aba **"1º Acesso"** (método *Confirmação por E-mail*) ou crie o usuário em `Authentication -> Users -> Add User` no Supabase Dashboard com o e-mail `admin@tatameclub.com.br`.
+2. Confirme o link enviado para a caixa de entrada de `admin@tatameclub.com.br` (ou defina a senha pelo link de **"Recuperar Senha"**).
+3. No **SQL Editor** do Supabase, execute uma única vez para vincular o privilégio global no banco:
+   ```sql
+   SELECT public.bootstrap_platform_owner_by_email('admin@tatameclub.com.br');
+   ```
+
+### Procedimento B — Via Edge Function Protegida (`platform-owner-bootstrap`) com Token Único
+1. Publique a Edge Function `supabase/functions/platform-owner-bootstrap/index.ts` e configure o segredo `PLATFORM_BOOTSTRAP_SECRET` em `Edge Functions -> Secrets` no Supabase.
+2. Em `https://painel.tatameclub.com.br`, selecione **"1º Acesso"** → **"Token Administrativo"**, informe o `PLATFORM_BOOTSTRAP_SECRET` e escolha sua senha forte.
