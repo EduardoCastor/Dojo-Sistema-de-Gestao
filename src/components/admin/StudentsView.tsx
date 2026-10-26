@@ -36,6 +36,7 @@ import {
   PhysicalAssessment,
   HealthRecord,
   BeltRank,
+  MartialArt,
   ClassGroup,
   Enrollment,
   MembershipPlan,
@@ -62,6 +63,7 @@ import { DataStore } from '../../data/storage';
 import { BmiEvolutionChart } from './BmiEvolutionChart';
 import { AssessmentFormModal } from './AssessmentFormModal';
 import { MedicalDocumentsSection } from './MedicalDocumentsSection';
+import { GraduationHistorySection } from './GraduationHistorySection';
 
 interface StudentsViewProps {
   students: Student[];
@@ -70,6 +72,7 @@ interface StudentsViewProps {
   assessments: PhysicalAssessment[];
   healthRecords: HealthRecord[];
   belts: BeltRank[];
+  martialArts?: MartialArt[];
   classes: ClassGroup[];
   enrollments: Enrollment[];
   isLoading?: boolean;
@@ -90,6 +93,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   assessments,
   healthRecords,
   belts,
+  martialArts = [],
   classes,
   enrollments,
   isLoading,
@@ -1452,49 +1456,19 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               )}
 
               {/* TAB 5: GRADUAÇÕES & FAIXAS */}
-              {profileTab === 'ranks' && (
-                <div className="space-y-4">
-                  <div className="border border-slate-800 rounded-lg overflow-hidden">
-                    <div className="bg-slate-950 px-3 py-2 font-semibold text-slate-300 text-[11px] flex items-center justify-between">
-                      <span>Graduações Registradas</span>
-                      <span className="text-[10px] text-slate-400">Total: {selectedStudent.currentGraduations?.length || 0}</span>
-                    </div>
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase">
-                        <tr>
-                          <th className="py-2 px-3">Modalidade</th>
-                          <th className="py-2 px-3">Faixa / Grau</th>
-                          <th className="py-2 px-3">Data da Graduação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {(!selectedStudent.currentGraduations || selectedStudent.currentGraduations.length === 0) ? (
-                          <tr>
-                            <td colSpan={3} className="py-4 text-center text-slate-500">
-                              Nenhuma graduação registrada.
-                            </td>
-                          </tr>
-                        ) : (
-                          selectedStudent.currentGraduations.map((g, idx) => (
-                            <tr key={idx}>
-                              <td className="py-2 px-3 font-semibold text-white">{g.martialArtName}</td>
-                              <td className="py-2 px-3">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className="h-3 w-3 rounded-full border border-slate-600 shrink-0"
-                                    style={{ backgroundColor: g.beltColorHex }}
-                                  />
-                                  <span className="font-medium text-slate-200">{g.beltName}</span>
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 font-mono text-slate-400">{formatDateBR(g.graduatedAt)}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              {profileTab === 'ranks' && selectedStudent && (
+                <GraduationHistorySection
+                  student={selectedStudent}
+                  studentPerson={activePerson}
+                  martialArts={martialArts}
+                  beltRanks={belts}
+                  currentUser={currentUser || null}
+                  branchName="Matriz"
+                  onStudentUpdated={(updatedStudent) => {
+                    setSelectedStudent(updatedStudent);
+                    onEditStudent(updatedStudent);
+                  }}
+                />
               )}
 
               {/* TAB 6: TURMAS */}

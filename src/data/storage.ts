@@ -7,6 +7,7 @@ import {
   PhysicalAssessment,
   HealthRecord,
   StudentMedicalDocument,
+  StudentGraduation,
   MartialArt,
   BeltRank,
   Student,
@@ -38,6 +39,7 @@ import {
   INITIAL_PHYSICAL_ASSESSMENTS,
   INITIAL_HEALTH_RECORDS,
   INITIAL_MEDICAL_DOCUMENTS,
+  INITIAL_STUDENT_GRADUATIONS,
   INITIAL_CLASSES,
   INITIAL_ENROLLMENTS,
   INITIAL_ATTENDANCES,
@@ -209,6 +211,38 @@ export class DataStore {
   static deleteMedicalDocument(docId: string): void {
     const all = this.getAllMedicalDocuments();
     save('student_medical_documents', all.filter((d) => d.id !== docId));
+  }
+
+  static getGraduations(tenantId: string, studentId?: string): StudentGraduation[] {
+    const all = load<StudentGraduation[]>('student_graduations', INITIAL_STUDENT_GRADUATIONS);
+    return all.filter((grad) => {
+      const matchTenant = grad.tenantId === tenantId;
+      return studentId ? matchTenant && grad.studentId === studentId : matchTenant;
+    });
+  }
+
+  static getAllGraduations(): StudentGraduation[] {
+    return load<StudentGraduation[]>('student_graduations', INITIAL_STUDENT_GRADUATIONS);
+  }
+
+  static saveGraduations(graduations: StudentGraduation[]): void {
+    save('student_graduations', graduations);
+  }
+
+  static saveGraduation(grad: StudentGraduation): void {
+    const all = this.getAllGraduations();
+    const existingIndex = all.findIndex((g) => g.id === grad.id);
+    if (existingIndex >= 0) {
+      all[existingIndex] = grad;
+    } else {
+      all.unshift(grad);
+    }
+    save('student_graduations', all);
+  }
+
+  static deleteGraduation(gradId: string): void {
+    const all = this.getAllGraduations();
+    save('student_graduations', all.filter((g) => g.id !== gradId));
   }
 
   static getMartialArts(tenantId: string): MartialArt[] {

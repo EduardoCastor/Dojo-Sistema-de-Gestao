@@ -255,6 +255,51 @@ export interface BeltRank {
   requiresExam: boolean;
 }
 
+export interface StudentGraduation {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  martialArtId: string;
+  martialArtName?: string;
+  beltRankId: string;
+  beltRankName?: string;
+  beltColorHex?: string;
+  graduatedAt: string; // YYYY-MM-DD
+  examinerName: string;
+  branchName?: string;
+  certificateCode?: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  hasInconsistency?: boolean;
+  inconsistencyMessage?: string;
+}
+
+export interface RecordGraduationPayload {
+  tenantId: string;
+  studentId: string;
+  martialArtId: string;
+  beltRankId: string;
+  graduatedAt: string; // YYYY-MM-DD
+  examinerName?: string;
+  branchName?: string;
+  certificateCode?: string;
+  notes?: string;
+}
+
+export interface UpdateGraduationPayload {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  martialArtId: string;
+  beltRankId: string;
+  graduatedAt: string; // YYYY-MM-DD
+  examinerName?: string;
+  branchName?: string;
+  certificateCode?: string;
+  notes?: string;
+}
+
 export interface GraduationHistory {
   id: string;
   tenantId: string;

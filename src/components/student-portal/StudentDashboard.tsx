@@ -82,14 +82,27 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/60 px-2 py-0.5 rounded border border-red-500/30">
-                {currentBelt?.martialArtName || 'Judô'}
-              </span>
               <span className="text-xs text-slate-400 font-mono">Matrícula: {student.registrationNumber}</span>
+              <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                {student.status === 'active' ? 'Ativo' : student.status}
+              </span>
             </div>
             <h2 className="text-xl font-bold text-white mt-0.5">{person.fullName}</h2>
-            <div className="text-xs text-slate-300">
-              Graduação Atual: <strong className="text-white">{currentBelt?.beltName || 'Faixa Branca'}</strong>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              {student.currentGraduations && student.currentGraduations.length > 0 ? (
+                student.currentGraduations.map((g, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/90 border border-slate-700">
+                    <span
+                      className="h-2.5 w-4 rounded-sm border border-slate-600 shrink-0 shadow-sm"
+                      style={{ backgroundColor: g.beltColorHex }}
+                    />
+                    <span className="text-[11px] font-bold text-white">{g.martialArtName}:</span>
+                    <span className="text-[11px] text-slate-200">{g.beltName}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-xs text-slate-400">Sem graduação registrada</div>
+              )}
             </div>
           </div>
         </div>

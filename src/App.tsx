@@ -1348,6 +1348,7 @@ export default function App() {
               assessments={physicalAssessments}
               healthRecords={healthRecords}
               belts={beltRanks}
+              martialArts={martialArts}
               classes={classes}
               enrollments={enrollments}
               isLoading={isLoadingStudents}
