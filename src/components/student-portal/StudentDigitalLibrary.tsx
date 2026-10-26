@@ -132,7 +132,7 @@ export const StudentDigitalLibrary: React.FC<StudentDigitalLibraryProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span className="font-semibold text-slate-300">TatameHub Acervo Pedagógico</span>
+              <span className="font-semibold text-slate-300">Tatame Club Acervo Pedagógico</span>
               <span>·</span>
               <span>Conteúdo Exclusivo do Aluno</span>
             </div>

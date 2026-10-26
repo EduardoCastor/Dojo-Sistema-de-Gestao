@@ -42,6 +42,7 @@ export type AdminViewTab =
   | 'exams'
   | 'competitions'
   | 'branches'
+  | 'team_users'
   | 'reports'
   | 'settings';
 
@@ -53,7 +54,7 @@ interface DashboardLayoutProps {
   onSelectBranch: (branchId: string) => void;
   activeTab: AdminViewTab;
   onSelectTab: (tab: AdminViewTab) => void;
-  onSwitchPersona: () => void;
+  onSwitchPersona?: () => void;
   onLogout: () => void;
   onUpgradePlan: () => void;
   onNavigateToSuperAdmin?: () => void;
@@ -68,7 +69,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onSelectBranch,
   activeTab,
   onSelectTab,
-  onSwitchPersona,
   onLogout,
   onUpgradePlan,
   onNavigateToSuperAdmin,
@@ -115,6 +115,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
     { id: 'exams', label: 'Exames de Graduação', icon: FileCheck2 },
     { id: 'competitions', label: 'Competições & Medalhas', icon: Trophy },
     { id: 'branches', label: 'Filiais & Unidades', icon: Building2 },
+    { id: 'team_users', label: 'Equipe & Acessos', icon: Shield },
     { id: 'reports', label: 'Relatórios & Exportação', icon: FileSpreadsheet },
     { id: 'settings', label: 'Configurações do Dojo', icon: Settings },
   ];
@@ -149,11 +150,11 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 />
               ) : (
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white font-bold text-sm shadow shrink-0">
-                  TH
+                  TC
                 </div>
               )}
               <div className="overflow-hidden">
-                <div className="text-sm font-bold text-white tracking-tight">Tatame<span className="text-red-500">Hub</span></div>
+                <div className="text-sm font-bold text-white tracking-tight">Tatame <span className="text-red-500">Club</span></div>
                 <div className="text-[10px] text-slate-400 truncate max-w-[130px]">{tenant?.tradeName || 'Academia'}</div>
               </div>
             </div>
@@ -203,22 +204,14 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-            <button
-              onClick={onSwitchPersona}
-              className="flex items-center justify-center gap-1.5 p-1.5 rounded-md border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
-              title="Trocar perfil de usuário para testar"
-            >
-              <ArrowRightLeft className="h-3 w-3" />
-              <span>Trocar</span>
-            </button>
+          <div className="pt-1 text-[11px]">
             <button
               onClick={onLogout}
-              className="flex items-center justify-center gap-1.5 p-1.5 rounded-md border border-slate-700 bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 transition-colors cursor-pointer"
-              title="Sair do sistema"
+              className="w-full flex items-center justify-center gap-1.5 p-2 rounded-md border border-slate-700 bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 transition-colors cursor-pointer"
+              title="Encerrar sessão na academia"
             >
-              <LogOut className="h-3 w-3" />
-              <span>Sair</span>
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Encerrar Sessão</span>
             </button>
           </div>
         </div>

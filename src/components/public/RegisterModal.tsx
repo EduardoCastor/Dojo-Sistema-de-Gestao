@@ -221,70 +221,28 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       return;
     }
 
-    // Fallback exclusivo para modo demonstração offline quando o Supabase NÃO estiver configurado
-    const tenantId = `tenant-${Date.now()}`;
-    const branchId = `branch-matriz-${Date.now()}`;
-    const userId = `user-owner-${Date.now()}`;
-
-    const now = new Date();
-    const trialExpiry = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
-
-    const newTenant: Tenant = {
-      id: tenantId,
-      tradeName,
-      legalName: legalName || tradeName,
-      cnpjOrCpf,
-      adminName,
-      email: email || 'contato@dojo.com.br',
-      phone: phone || '(11) 98888-0000',
-      whatsapp: whatsapp || phone || '(11) 98888-0000',
-      logoUrl: logoUrl || undefined,
-      address: {
-        street: street || 'Rua Principal',
-        number: number || '100',
-        neighborhood: neighborhood || 'Centro',
-        city: city || 'São Paulo',
-        state: state || 'SP',
-        zipCode: zipCode || '01000-000',
-      },
-      planId: 'trial',
-      status: 'trial',
-      trialStartedAt: now.toISOString(),
-      trialExpiresAt: trialExpiry.toISOString(),
-      createdAt: now.toISOString(),
-      retentionDays: 60,
-      settings: {
-        defaultDueDay: 10,
-        penaltyRate: 2.0,
-        dailyInterestRate: 0.033,
-        familyDiscount2ndMember: 15,
-        multiArtDiscount: 20,
-        customBrandColor: '#dc2626',
-      },
-    };
-
-    const newBranch: Branch = {
-      id: branchId,
-      tenantId,
-      name: 'Unidade Matriz',
-      isHeadquarter: true,
-      phone: phone || '(11) 98888-0000',
-      email: email || 'contato@dojo.com.br',
-      address: `${street || 'Rua Principal'}, ${number || '100'} - ${city}/${state}`,
-      managerName: adminName,
-      active: true,
-    };
-
-    const newUser: UserType = {
-      id: userId,
-      tenantId,
-      branchId,
-      name: adminName,
-      email: email || 'contato@dojo.com.br',
-      role: 'owner',
-      phone,
-      active: true,
-    };
+    // Provisionamento isolado da nova academia sem qualquer vínculo com dados de demonstração
+    const { tenant: newTenant, branch: newBranch, ownerUser: newUser } =
+      await import('../../services/saasPlatformService').then((m) =>
+        m.saasPlatformService.registerAcademyIsolated({
+          tradeName: tradeName.trim(),
+          legalName: (legalName || tradeName).trim(),
+          cnpjOrCpf: cnpjOrCpf.trim(),
+          adminName: adminName.trim(),
+          email: (email || 'contato@dojo.com.br').trim().toLowerCase(),
+          phone: phone || '(11) 98888-0000',
+          whatsapp: whatsapp || phone || '(11) 98888-0000',
+          logoUrl: logoUrl || undefined,
+          address: {
+            street: street || 'Rua Principal',
+            number: number || '100',
+            neighborhood: neighborhood || 'Centro',
+            city: city || 'São Paulo',
+            state: state || 'SP',
+            zipCode: zipCode || '01000-000',
+          },
+        })
+      );
 
     onSuccess(newTenant, newBranch, newUser);
   };

@@ -18,6 +18,7 @@ export interface SaaSPlan {
   trialDays: number;
   maxStudents: number;
   maxBranches: number;
+  maxUsers: number;
   maxStorageGb: number;
   features: {
     digitalLibrary: boolean;
@@ -89,6 +90,23 @@ export interface User {
   active: boolean;
   studentId?: string; // If role is 'student'
   guardianPersonId?: string; // If role is 'guardian'
+  invitedByUserId?: string;
+  createdAt?: string;
+}
+
+export interface TenantUserInvitation {
+  id: string;
+  tenantId: string;
+  branchId?: string;
+  email: string;
+  fullName: string;
+  role: Exclude<UserRole, 'superadmin'>;
+  phone?: string;
+  status: 'invited' | 'accepted' | 'revoked' | 'expired';
+  invitedByUserId: string;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export interface Person {
@@ -730,6 +748,7 @@ export interface SaaSCommercialPlan {
   trialDays: number;
   maxStudents: number;
   maxBranches: number;
+  maxUsers: number;
   maxStorageGb: number;
   features: {
     digitalLibrary: boolean;
@@ -759,6 +778,9 @@ export interface SaaSSubscription {
   nextDueDate: string;
   trialExpiresAt?: string;
   gracePeriodDays: number; // Dias de tolerância antes de bloqueio por atraso (default: 5 dias)
+  customMaxUsers?: number;
+  customMaxBranches?: number;
+  customMaxStudents?: number;
   gatewayCustomerId?: string;
   gatewaySubscriptionId?: string;
   cancelReason?: string;
@@ -829,8 +851,10 @@ export interface PlatformAuditLog {
     | 'change_subscription_plan'
     | 'process_payment_webhook'
     | 'refund_payment'
-    | 'register_tenant';
-  entityType: 'tenant' | 'plan' | 'subscription' | 'payment' | 'gateway';
+    | 'register_tenant'
+    | 'update_license_limits'
+    | 'bootstrap_platform_owner';
+  entityType: 'tenant' | 'plan' | 'subscription' | 'payment' | 'gateway' | 'user';
   entityId: string;
   tenantId?: string;
   tenantName?: string;
@@ -869,6 +893,9 @@ export interface TenantAccessEvaluation {
     maxBranches: number;
     currentBranches: number;
     isBranchesLimitReached: boolean;
+    maxUsers: number;
+    currentUsers: number;
+    isUsersLimitReached: boolean;
   };
 }
 

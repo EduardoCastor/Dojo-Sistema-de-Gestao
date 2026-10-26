@@ -410,7 +410,7 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="responsavel@tatamehub.com.br"
+                  placeholder="responsavel@tatameclub.com.br"
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
                 />
               </div>

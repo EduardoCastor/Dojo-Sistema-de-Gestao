@@ -25,7 +25,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenRegister, onOpen
             </h1>
 
             <p className="text-base sm:text-lg text-slate-300 leading-relaxed max-w-2xl">
-              Chega de planilhas desorganizadas. O TatameHub centraliza controle de faixas e graduações, chamadas de frequência, validação anti-conflito de horários, mensalidades com desconto familiar e portais exclusivos para alunos e responsáveis.
+              Chega de planilhas desorganizadas. O Tatame Club centraliza controle de faixas e graduações, chamadas de frequência, validação anti-conflito de horários, mensalidades com desconto familiar e portais exclusivos para alunos e responsáveis.
             </p>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 pt-2">
@@ -41,7 +41,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenRegister, onOpen
                 onClick={onOpenLogin}
                 className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/80 px-6 py-3.5 text-base font-medium text-slate-200 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
               >
-                <span>Ver Demonstração Interativa</span>
+                <span>Acessar Minha Academia</span>
               </button>
             </div>
 

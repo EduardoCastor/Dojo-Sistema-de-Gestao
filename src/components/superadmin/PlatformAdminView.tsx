@@ -110,6 +110,12 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
   const [manualActivateDays, setManualActivateDays] = useState<number>(30);
   const [manualActivateReason, setManualActivateReason] = useState('');
 
+  const [tenantForCustomLimits, setTenantForCustomLimits] = useState<Tenant | null>(null);
+  const [customMaxUsersInput, setCustomMaxUsersInput] = useState<string>('');
+  const [customMaxBranchesInput, setCustomMaxBranchesInput] = useState<string>('');
+  const [customMaxStudentsInput, setCustomMaxStudentsInput] = useState<string>('');
+  const [customLimitsReason, setCustomLimitsReason] = useState<string>('');
+
   const [isNewPlanModalOpen, setIsNewPlanModalOpen] = useState(false);
   const [newPlanForm, setNewPlanForm] = useState<Partial<SaaSCommercialPlan>>({
     id: '',
@@ -121,6 +127,7 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
     billingCycle: 'monthly',
     trialDays: 0,
     maxStudents: 150,
+    maxUsers: 8,
     maxBranches: 2,
     maxStorageGb: 15,
     features: {
@@ -317,6 +324,7 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
       cycleMultiplier: 1,
       trialDays: Number(newPlanForm.trialDays || 0),
       maxStudents: Number(newPlanForm.maxStudents || 100),
+      maxUsers: Number(newPlanForm.maxUsers || 5),
       maxBranches: Number(newPlanForm.maxBranches || 1),
       maxStorageGb: Number(newPlanForm.maxStorageGb || 10),
       features: newPlanForm.features || {
@@ -340,6 +348,25 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
     showFeedback(`Plano comercial "${created.name}" criado com sucesso.`);
   };
 
+  const handleSaveCustomLicenseLimits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantForCustomLimits) return;
+    await saasPlatformService.updateLicenseLimits(
+      tenantForCustomLimits.id,
+      {
+        customMaxUsers: customMaxUsersInput.trim() === '' ? null : Math.max(1, Number(customMaxUsersInput)),
+        customMaxBranches: customMaxBranchesInput.trim() === '' ? null : Math.max(1, Number(customMaxBranchesInput)),
+        customMaxStudents: customMaxStudentsInput.trim() === '' ? null : Math.max(1, Number(customMaxStudentsInput)),
+      },
+      customLimitsReason || 'Ajuste individual de limites da licença pelo proprietário SaaS',
+      currentUser
+    );
+    setSubscriptions(DataStore.getSaaSSubscriptions());
+    setAuditLogs(DataStore.getPlatformAuditLogs());
+    showFeedback(`Limites comerciais da licença de "${tenantForCustomLimits.tradeName}" atualizados com sucesso.`);
+    setTenantForCustomLimits(null);
+  };
+
   const handleTogglePlanActive = async (plan: SaaSCommercialPlan) => {
     const updated = { ...plan, active: !plan.active };
     await saasPlatformService.savePlan(updated, currentUser.id, currentUser.name);
@@ -361,10 +388,10 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
             <span className="text-xs text-slate-400">Administrador Global SaaS</span>
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            TatameHub Platform Owner
+            Tatame Club · Painel Global do Proprietário SaaS
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Gestão multi-tenant das academias clientes, planos comerciais, assinaturas recorrentes e controle de acesso.
+            Gestão multi-tenant das academias clientes, planos comerciais, limites por licença, assinaturas recorrentes e controle de acesso.
           </p>
         </div>
 
@@ -647,8 +674,8 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                     <th className="py-3 px-4">Academia / Dojô</th>
                     <th className="py-3 px-4">Responsável</th>
                     <th className="py-3 px-4">Plano Contratado</th>
+                    <th className="py-3 px-4">Uso da Licença (Usuários / Unidades)</th>
                     <th className="py-3 px-4">Status & Acesso</th>
-                    <th className="py-3 px-4">Cidade / UF</th>
                     <th className="py-3 px-4 text-right">Ações Administrativas</th>
                   </tr>
                 </thead>
@@ -665,15 +692,21 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                       const sub = subscriptions.find(s => s.tenantId === t.id);
                       const isSuspended = t.status === 'suspended' || sub?.status === 'suspended';
                       const isTrial = t.status === 'trial' || sub?.status === 'trial';
+                      const effectiveLimits = saasPlatformService.getEffectiveLimits(t.id);
 
                       return (
                         <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
                           <td className="py-3 px-4">
                             <div className="font-bold text-white flex items-center gap-2">
                               <span>{t.tradeName}</span>
+                              {effectiveLimits.hasCustomLimits && (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[9px] font-bold">
+                                  Custom
+                                </span>
+                              )}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono">
-                              CNPJ: {t.cnpjOrCpf} · ID: {t.id}
+                              CNPJ: {t.cnpjOrCpf} · {t.address.city}/{t.address.state}
                             </div>
                           </td>
 
@@ -694,16 +727,32 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                           </td>
 
                           <td className="py-3 px-4">
+                            <div className="text-[11px] text-slate-200 font-mono">
+                              Usuários: <strong>{effectiveLimits.totalReservedUsers}</strong> / {effectiveLimits.maxUsers}
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              Unidades: <strong>{effectiveLimits.currentBranches}</strong> / {effectiveLimits.maxBranches} · Alunos: {effectiveLimits.currentStudents}/{effectiveLimits.maxStudents}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4">
                             {isSuspended ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950/60 text-rose-400 border border-rose-500/30">
                                 <XCircle className="h-3 w-3" />
                                 <span>Acesso Suspenso</span>
                               </span>
                             ) : isTrial ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/60 text-amber-400 border border-amber-500/30">
-                                <Clock className="h-3 w-3" />
-                                <span>Teste 10 Dias</span>
-                              </span>
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/60 text-amber-400 border border-amber-500/30">
+                                  <Clock className="h-3 w-3" />
+                                  <span>Teste 10 Dias</span>
+                                </span>
+                                {t.trialExpiresAt && (
+                                  <span className="block text-[10px] text-slate-500 mt-0.5">
+                                    Expira: {formatDateBR(t.trialExpiresAt)}
+                                  </span>
+                                )}
+                              </div>
                             ) : sub?.status === 'past_due' ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-950/60 text-orange-400 border border-orange-500/30">
                                 <AlertTriangle className="h-3 w-3" />
@@ -717,12 +766,8 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                             )}
                           </td>
 
-                          <td className="py-3 px-4 text-slate-400">
-                            {t.address.city}/{t.address.state}
-                          </td>
-
                           <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
                               <button
                                 onClick={() => {
                                   setSelectedTenantForDetails(t);
@@ -732,6 +777,32 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                                 title="Ver ficha cadastral e histórico"
                               >
                                 Detalhes
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setTenantForCustomLimits(t);
+                                  setCustomMaxUsersInput(
+                                    sub?.customMaxUsers !== undefined && sub?.customMaxUsers !== null
+                                      ? String(sub.customMaxUsers)
+                                      : ''
+                                  );
+                                  setCustomMaxBranchesInput(
+                                    sub?.customMaxBranches !== undefined && sub?.customMaxBranches !== null
+                                      ? String(sub.customMaxBranches)
+                                      : ''
+                                  );
+                                  setCustomMaxStudentsInput(
+                                    sub?.customMaxStudents !== undefined && sub?.customMaxStudents !== null
+                                      ? String(sub.customMaxStudents)
+                                      : ''
+                                  );
+                                  setCustomLimitsReason('');
+                                }}
+                                className="px-2.5 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
+                                title="Personalizar limites de usuários, unidades e alunos desta licença"
+                              >
+                                Limites
                               </button>
 
                               <button
@@ -764,9 +835,9 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                               <button
                                 onClick={() => onSwitchTenant(t.id)}
                                 className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                                title="Acessar Dojo no papel de Administrador"
+                                title="Inspecionar Dojo como SuperAdmin"
                               >
-                                <span>Acessar</span>
+                                <span>Inspecionar</span>
                                 <ExternalLink className="h-3 w-3" />
                               </button>
                             </div>
@@ -787,7 +858,7 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-bold text-white">Catálogo de Planos Comerciais do TatameHub</h3>
+              <h3 className="text-sm font-bold text-white">Catálogo de Planos Comerciais do Tatame Club</h3>
               <p className="text-xs text-slate-400">
                 Planos oferecidos para contratação por academias e centros de treinamento de artes marciais.
               </p>
@@ -841,7 +912,11 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                       <strong className="text-white font-mono">{plan.maxStudents}</strong>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Limite de Filiais:</span>
+                      <span className="text-slate-400">Limite de Usuários:</span>
+                      <strong className="text-white font-mono">{plan.maxUsers || 3}</strong>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Limite de Unidades:</span>
                       <strong className="text-white font-mono">{plan.maxBranches}</strong>
                     </div>
                     <div className="flex items-center justify-between">
@@ -1232,7 +1307,7 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
             <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/80 space-y-3 text-xs">
               <div className="font-bold text-white">Endpoint do Webhook Seguro:</div>
               <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 font-mono text-[11px] text-slate-300 flex items-center justify-between">
-                <span>https://api.tatamehub.com.br/api/webhooks/saas-payments</span>
+                <span>https://api.tatameclub.com.br/api/webhooks/saas-payments</span>
                 <span className="text-[10px] text-emerald-400 font-sans">Validação de Assinatura HMAC-SHA256</span>
               </div>
               <p className="text-[11px] text-slate-500">
@@ -1645,7 +1720,19 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Máx. de Filiais *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Máx. de Usuários *</label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  value={newPlanForm.maxUsers || 5}
+                  onChange={e => setNewPlanForm(prev => ({ ...prev, maxUsers: Number(e.target.value) }))}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white font-mono focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Máx. de Unidades *</label>
                 <input
                   type="number"
                   required
@@ -1740,6 +1827,107 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold cursor-pointer"
               >
                 Salvar Plano
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 7: CONFIGURAR LIMITES COMERCIAIS INDIVIDUAIS DA LICENÇA */}
+      {tenantForCustomLimits && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveCustomLicenseLimits}
+            className="bg-slate-900 border border-amber-500/30 rounded-2xl max-w-md w-full p-6 space-y-4 text-xs text-slate-200"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Limites da Licença — {tenantForCustomLimits.tradeName}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Sobrescreva os limites do plano ({tenantForCustomLimits.planId.toUpperCase()}) para esta academia ou deixe em branco para usar o padrão do plano.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTenantForCustomLimits(null)}
+                className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Limite Personalizado de Usuários Ativos (Equipe)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={customMaxUsersInput}
+                  onChange={e => setCustomMaxUsersInput(e.target.value)}
+                  placeholder="Deixe vazio para usar o limite padrão do plano"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white font-mono focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Limite Personalizado de Unidades (Matriz + Filiais)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={customMaxBranchesInput}
+                  onChange={e => setCustomMaxBranchesInput(e.target.value)}
+                  placeholder="Deixe vazio para usar o limite padrão do plano"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white font-mono focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Limite Personalizado de Alunos
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={customMaxStudentsInput}
+                  onChange={e => setCustomMaxStudentsInput(e.target.value)}
+                  placeholder="Deixe vazio para usar o limite padrão do plano"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white font-mono focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Justificativa Comercial / Observação de Auditoria
+                </label>
+                <input
+                  type="text"
+                  value={customLimitsReason}
+                  onChange={e => setCustomLimitsReason(e.target.value)}
+                  placeholder="Ex: Aditivo contratual para +2 unidades e +5 instrutores"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTenantForCustomLimits(null)}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold cursor-pointer"
+              >
+                Salvar Limites da Licença
               </button>
             </div>
           </form>

@@ -388,7 +388,7 @@ export const TatamiOccupancyView: React.FC<TatamiOccupancyViewProps> = ({
       setLocalTatamis((prev) => [created, ...prev]);
       setFeedbackBanner({
         type: 'success',
-        message: `Tatami "${created.name}" cadastrado com sucesso no TatameHub.`,
+        message: `Tatami "${created.name}" cadastrado com sucesso no Tatame Club.`,
       });
     }
 

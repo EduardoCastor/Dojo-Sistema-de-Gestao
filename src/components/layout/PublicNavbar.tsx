@@ -16,7 +16,7 @@ export const PublicNavbar: React.FC<PublicNavbarProps> = ({ onOpenRegister, onOp
             <Shield className="h-5 w-5" />
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-xl font-bold tracking-tight text-white">Tatame<span className="text-red-500">Hub</span></span>
+            <span className="text-xl font-bold tracking-tight text-white">Tatame <span className="text-red-500">Club</span></span>
             <span className="text-[10px] font-semibold text-slate-400 tracking-wider">SaaS</span>
           </div>
         </a>

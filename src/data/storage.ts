@@ -30,6 +30,7 @@ import {
   SaaSSubscription,
   SaaSPayment,
   PlatformAuditLog,
+  TenantUserInvitation,
 } from '../types';
 
 import {
@@ -127,11 +128,24 @@ export class DataStore {
 
   static getUsers(tenantId?: string): User[] {
     const all = load('users', INITIAL_USERS);
-    return tenantId && tenantId !== 'platform' ? all.filter(u => u.tenantId === tenantId || u.tenantId === 'platform') : all;
+    return tenantId && tenantId !== 'platform' ? all.filter(u => u.tenantId === tenantId) : all;
+  }
+
+  static getAllUsers(): User[] {
+    return load('users', INITIAL_USERS);
   }
 
   static saveUsers(users: User[]): void {
     save('users', users);
+  }
+
+  static getTenantInvitations(tenantId?: string): TenantUserInvitation[] {
+    const all = load<TenantUserInvitation[]>('tenant_invitations', []);
+    return tenantId ? all.filter(inv => inv.tenantId === tenantId) : all;
+  }
+
+  static saveTenantInvitations(invitations: TenantUserInvitation[]): void {
+    save('tenant_invitations', invitations);
   }
 
   static getPersons(tenantId: string): Person[] {
@@ -255,32 +269,175 @@ export class DataStore {
 
   static getMartialArts(tenantId: string): MartialArt[] {
     const all = load('martial_arts', INITIAL_MARTIAL_ARTS);
-    const filtered = all.filter(m => m.tenantId === tenantId);
-    return filtered.length > 0 ? filtered : all.filter(m => m.tenantId === 'tenant-kodokan');
+    return all.filter(m => m.tenantId === tenantId);
   }
 
   static saveMartialArts(arts: MartialArt[]): void {
-    save('martial_arts', arts);
+    const all = load('martial_arts', INITIAL_MARTIAL_ARTS);
+    const updatedTenantIds = new Set(arts.map(a => a.tenantId));
+    const others = all.filter(a => !updatedTenantIds.has(a.tenantId));
+    save('martial_arts', [...arts, ...others]);
   }
 
   static getBeltRanks(tenantId: string): BeltRank[] {
     const all = load('belt_ranks', INITIAL_BELT_RANKS);
-    const filtered = all.filter(b => b.tenantId === tenantId);
-    return filtered.length > 0 ? filtered : all.filter(b => b.tenantId === 'tenant-kodokan');
+    return all.filter(b => b.tenantId === tenantId);
   }
 
   static saveBeltRanks(ranks: BeltRank[]): void {
-    save('belt_ranks', ranks);
+    const all = load('belt_ranks', INITIAL_BELT_RANKS);
+    const updatedTenantIds = new Set(ranks.map(r => r.tenantId));
+    const others = all.filter(r => !updatedTenantIds.has(r.tenantId));
+    save('belt_ranks', [...ranks, ...others]);
   }
 
   static getTatamis(tenantId: string): Tatami[] {
     const all = load('tatamis', INITIAL_TATAMIS);
-    const filtered = all.filter(t => t.tenantId === tenantId);
-    return filtered.length > 0 ? filtered : all.filter(t => t.tenantId === 'tenant-kodokan');
+    return all.filter(t => t.tenantId === tenantId);
   }
 
   static saveTatamis(tatamis: Tatami[]): void {
-    save('tatamis', tatamis);
+    const all = load('tatamis', INITIAL_TATAMIS);
+    const updatedTenantIds = new Set(tatamis.map(t => t.tenantId));
+    const others = all.filter(t => !updatedTenantIds.has(t.tenantId));
+    save('tatamis', [...tatamis, ...others]);
+  }
+
+  /**
+   * Cria registros iniciais isolados de modalidades (Judô e Jiu-Jitsu), faixas e tatami principal
+   * exclusivamente para uma nova academia (tenantId), sem compartilhar dados de outras academias.
+   */
+  static seedDefaultModalitiesForTenant(tenantId: string, branchId?: string): {
+    martialArts: MartialArt[];
+    beltRanks: BeltRank[];
+    tatamis: Tatami[];
+  } {
+    const existingArts = this.getMartialArts(tenantId);
+    if (existingArts.length > 0) {
+      return {
+        martialArts: existingArts,
+        beltRanks: this.getBeltRanks(tenantId),
+        tatamis: this.getTatamis(tenantId),
+      };
+    }
+
+    const judoArtId = `art-judo-${tenantId}`;
+    const bjjArtId = `art-bjj-${tenantId}`;
+
+    const newArts: MartialArt[] = [
+      {
+        id: judoArtId,
+        tenantId,
+        name: 'Judô',
+        origin: 'Japão',
+        description: 'Caminho Suave. Arte marcial olímpica focada em projeções e domínio no solo.',
+        governingFederation: 'CBJ / IJF',
+        status: 'active',
+      },
+      {
+        id: bjjArtId,
+        tenantId,
+        name: 'Jiu-Jitsu Brasileiro (BJJ)',
+        origin: 'Brasil',
+        description: 'Arte suave focada em alavancas, imobilizações e finalizações no solo.',
+        governingFederation: 'CBJJ / IBJJF',
+        status: 'active',
+      },
+    ];
+
+    const newBelts: BeltRank[] = [
+      {
+        id: `rank-judo-branca-${tenantId}`,
+        tenantId,
+        martialArtId: judoArtId,
+        name: 'Faixa Branca (Mukyu)',
+        rankType: 'faixa',
+        orderIndex: 1,
+        colorHex: '#ffffff',
+        minAgeYears: 4,
+        minPracticeMonths: 0,
+        technicalRequirements: 'Ukemi básico, cumprimentos (Reiho) e postura fundamental.',
+        requiresExam: false,
+      },
+      {
+        id: `rank-judo-cinza-${tenantId}`,
+        tenantId,
+        martialArtId: judoArtId,
+        name: 'Faixa Cinza',
+        rankType: 'faixa',
+        orderIndex: 2,
+        colorHex: '#94a3b8',
+        minAgeYears: 5,
+        minPracticeMonths: 6,
+        technicalRequirements: 'O-Soto-Gari, Kesa-Gatame e rolamentos básicos.',
+        requiresExam: true,
+      },
+      {
+        id: `rank-judo-azul-${tenantId}`,
+        tenantId,
+        martialArtId: judoArtId,
+        name: 'Faixa Azul',
+        rankType: 'faixa',
+        orderIndex: 3,
+        colorHex: '#2563eb',
+        minAgeYears: 7,
+        minPracticeMonths: 8,
+        technicalRequirements: 'De-Ashi-Harai, O-Goshi e Yoko-Shiho-Gatame.',
+        requiresExam: true,
+      },
+      {
+        id: `rank-bjj-branca-${tenantId}`,
+        tenantId,
+        martialArtId: bjjArtId,
+        name: 'Faixa Branca',
+        rankType: 'faixa',
+        orderIndex: 1,
+        colorHex: '#ffffff',
+        minAgeYears: 4,
+        minPracticeMonths: 0,
+        technicalRequirements: 'Fundamentos de guarda, reposição e escapes.',
+        requiresExam: false,
+      },
+      {
+        id: `rank-bjj-azul-${tenantId}`,
+        tenantId,
+        martialArtId: bjjArtId,
+        name: 'Faixa Azul',
+        rankType: 'faixa',
+        orderIndex: 2,
+        colorHex: '#2563eb',
+        minAgeYears: 16,
+        minPracticeMonths: 18,
+        technicalRequirements: 'Domínio de passagens de guarda, raspagens e finalizações básicas.',
+        requiresExam: true,
+      },
+    ];
+
+    const newTatamis: Tatami[] = [
+      {
+        id: `tatami-principal-${tenantId}`,
+        tenantId,
+        branchId,
+        name: 'Tatami Principal (Matriz)',
+        dimensions: '10x10m (100m²)',
+        maxCapacity: 25,
+        colorHex: '#dc2626',
+        description: 'Área principal de treinamento da academia.',
+        active: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+
+    this.saveMartialArts(newArts);
+    this.saveBeltRanks(newBelts);
+    this.saveTatamis(newTatamis);
+
+    return {
+      martialArts: newArts,
+      beltRanks: newBelts,
+      tatamis: newTatamis,
+    };
   }
 
   static getClasses(tenantId: string): ClassGroup[] {

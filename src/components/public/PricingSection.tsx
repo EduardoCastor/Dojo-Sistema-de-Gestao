@@ -82,7 +82,12 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ plans, onSelectP
 
                     <div className="flex items-center gap-2 text-slate-300">
                       <Check className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span>{plan.maxBranches === 1 ? '1 Unidade (Sem filiais)' : `Até ${plan.maxBranches} Filiais integradas`}</span>
+                      <span>Até {plan.maxUsers || 3} usuários ativos na equipe</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-slate-300">
+                      <Check className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span>{plan.maxBranches === 1 ? '1 Unidade (Matriz inclusa)' : `Até ${plan.maxBranches} Unidades (Matriz + ${plan.maxBranches - 1} filiais)`}</span>
                     </div>
 
                     <div className="flex items-center gap-2 text-slate-300">

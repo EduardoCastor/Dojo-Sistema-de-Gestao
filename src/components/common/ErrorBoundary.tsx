@@ -55,7 +55,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
               <div>
                 <h2 className="text-lg font-bold text-white tracking-tight">Ocorreu uma falha na renderização</h2>
-                <p className="text-xs text-slate-400">TatameHub detectou uma interrupção inesperada.</p>
+                <p className="text-xs text-slate-400">Tatame Club detectou uma interrupção inesperada.</p>
               </div>
             </div>
 

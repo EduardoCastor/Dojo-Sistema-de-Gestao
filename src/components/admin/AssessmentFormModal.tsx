@@ -190,7 +190,7 @@ export const AssessmentFormModal: React.FC<AssessmentFormModalProps> = ({
         ageMonthsAtMeasurement: classResult.ageMonthsAtMeasurement,
         classification: classResult.classification,
         referenceStandard: classResult.referenceStandard,
-        evaluatorName: evaluatorName.trim() || currentUser?.name || 'Avaliador TatameHub',
+        evaluatorName: evaluatorName.trim() || currentUser?.name || 'Avaliador Tatame Club',
         recordedByUserId: currentUser?.id,
         notes: notes.trim() || undefined,
       };

@@ -35,7 +35,7 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
             <h3 className="text-lg font-bold text-white">Contratar ou Alterar Plano SaaS</h3>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Selecione o plano ideal para continuar utilizando o TatameHub sem interrupções após o período de teste.
+            Selecione o plano ideal para continuar utilizando o Tatame Club sem interrupções após o período de teste.
           </p>
         </div>
 
@@ -77,7 +77,11 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span>{plan.maxBranches === 1 ? '1 Unidade' : `Até ${plan.maxBranches} Filiais integradas`}</span>
+                      <span>Até {plan.maxUsers || 3} usuários ativos na equipe</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span>{plan.maxBranches === 1 ? '1 Unidade (Matriz)' : `Até ${plan.maxBranches} Unidades integradas`}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-emerald-400 shrink-0" />

@@ -353,7 +353,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </span>
             </div>
             <div className="text-[10px] text-emerald-400 printable-text-gray">
-              ✓ Autenticidade Registrada TatameHub
+              ✓ Autenticidade Registrada Tatame Club
             </div>
           </div>
         </div>
@@ -715,7 +715,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Rodapé institucional para impressões */}
         <div className="pt-6 border-t border-slate-800/60 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 printable-text-gray gap-2">
           <div>
-            Documento emitido digitalmente pela plataforma <strong>TatameHub</strong> em{' '}
+            Documento emitido digitalmente pela plataforma <strong>Tatame Club</strong> em{' '}
             {formatDateBR(new Date().toISOString())}.
           </div>
           <div className="font-mono">

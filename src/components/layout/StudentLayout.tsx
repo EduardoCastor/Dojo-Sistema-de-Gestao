@@ -27,7 +27,7 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
               <Shield className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white tracking-tight">Tatame<span className="text-red-500">Hub</span></div>
+              <div className="text-sm font-bold text-white tracking-tight">Tatame <span className="text-red-500">Club</span></div>
               <div className="text-[10px] text-slate-400">{tenant.tradeName}</div>
             </div>
           </div>
@@ -38,15 +38,6 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
               <span className="font-semibold text-white">{currentUser.name}</span>
               <span className="text-slate-400 text-[10px] capitalize">({currentUser.role === 'student' ? 'Aluno' : 'Responsável'})</span>
             </div>
-
-            <button
-              onClick={onSwitchPersona}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
-              title="Trocar papel de demonstração"
-            >
-              <ArrowRightLeft className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Trocar Perfil</span>
-            </button>
 
             <button
               onClick={onLogout}
@@ -66,7 +57,7 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
 
       {/* Minimal Footer */}
       <footer className="border-t border-slate-900 py-6 text-center text-xs text-slate-500">
-        TatameHub SaaS · {tenant.tradeName} · Conectado com segurança
+        Tatame Club · {tenant.tradeName} · Conectado com segurança
       </footer>
     </div>
   );

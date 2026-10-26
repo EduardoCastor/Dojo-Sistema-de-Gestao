@@ -11,7 +11,7 @@ export const PublicFooter: React.FC = () => {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600/10 border border-red-500/20 text-red-500">
                 <Shield className="h-4 w-4" />
               </div>
-              <span className="text-lg font-bold text-white tracking-tight">Tatame<span className="text-red-500">Hub</span></span>
+              <span className="text-lg font-bold text-white tracking-tight">Tatame <span className="text-red-500">Club</span></span>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
               Plataforma SaaS para gestão integral de dojos e academias de artes marciais no Brasil. Especializada em Judô, Jiu-Jitsu, Karatê e modalidades de combate.
@@ -33,13 +33,13 @@ export const PublicFooter: React.FC = () => {
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Portais</h4>
+            <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Ambientes da Academia</h4>
             <ul className="space-y-2 text-xs">
-              <li><a href="#login" className="hover:text-white transition-colors">Painel da Academia</a></li>
+              <li><a href="#login" className="hover:text-white transition-colors">Painel da Academia (Owner / Gestor)</a></li>
               <li><a href="#login" className="hover:text-white transition-colors">Portal do Professor / Sensei</a></li>
               <li><a href="#login" className="hover:text-white transition-colors">Portal do Aluno</a></li>
               <li><a href="#login" className="hover:text-white transition-colors">Portal dos Responsáveis</a></li>
-              <li><a href="#login" className="hover:text-white transition-colors">Administração Central SaaS</a></li>
+              <li><span className="text-slate-500">tatameclub.com.br</span></li>
             </ul>
           </div>
 
@@ -56,7 +56,7 @@ export const PublicFooter: React.FC = () => {
         </div>
 
         <div className="border-t border-slate-900 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <p>© {new Date().getFullYear()} TatameHub SaaS. Todos os direitos reservados. Feito para o ecossistema de artes marciais brasileiro.</p>
+          <p>© {new Date().getFullYear()} Tatame Club. Todos os direitos reservados. Feito para o ecossistema de artes marciais brasileiro.</p>
           <div className="flex gap-6">
             <span>Termos de Uso</span>
             <span>·</span>

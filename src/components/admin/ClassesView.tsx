@@ -66,7 +66,7 @@ export const ClassesView: React.FC<ClassesViewProps> = ({
   tatamis = [],
   instructors,
   tenantId = 'tenant-kodokan',
-  tenantName = 'TatameHub Dojo',
+  tenantName = 'Tatame Club Dojo',
   onOpenAttendance,
   onAddClass,
   onRefreshData,

@@ -1,6 +1,6 @@
 {
-  "name": "TatameHub - Gestão de Academias de Artes Marciais",
-  "description": "Plataforma SaaS multi-tenant para gestão profissional de academias de artes marciais (judô, jiu-jítsu, karatê e modalidades afins), com controle de matrículas, graduações, turmas, frequências e financeiro.",
+  "name": "Tatame Club - Gestão de Academias de Artes Marciais",
+  "description": "Tatame Club: Plataforma SaaS multi-tenant para gestão profissional de academias de artes marciais (judô, jiu-jítsu, karatê e modalidades afins), com controle de matrículas, graduações, turmas, frequências e financeiro.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

@@ -54,6 +54,7 @@ import { DigitalLibraryView } from './components/admin/DigitalLibraryView';
 import { BeltExamsView } from './components/admin/BeltExamsView';
 import { CompetitionsView } from './components/admin/CompetitionsView';
 import { BranchesView } from './components/admin/BranchesView';
+import { TeamUsersView } from './components/admin/TeamUsersView';
 import { ReportsView } from './components/admin/ReportsView';
 import { SettingsView } from './components/admin/SettingsView';
 import { PlanUpgradeModal } from './components/admin/PlanUpgradeModal';
@@ -62,6 +63,7 @@ import { PlanUpgradeModal } from './components/admin/PlanUpgradeModal';
 import { StudentDashboard } from './components/student-portal/StudentDashboard';
 import { GuardianPortal } from './components/student-portal/GuardianPortal';
 import { PlatformAdminView } from './components/superadmin/PlatformAdminView';
+import { PlatformAdminAuthView } from './components/superadmin/PlatformAdminAuthView';
 
 // Supabase Real-Time & Auth Services
 import { supabase, authService, isSupabaseConfigured, UserMembership } from './services/supabase';
@@ -71,10 +73,17 @@ import { attendanceService } from './services/attendanceService';
 import { tatamiService } from './services/tatamiService';
 import { financialService, getCurrentCompetence } from './services/financialService';
 import { assessmentService } from './services/assessmentService';
+import { saasPlatformService } from './services/saasPlatformService';
+import { detectEnvironmentMode, isAuthorizedPlatformOwnerEmail, OFFICIAL_DOMAINS } from './utils/domainConfig';
 
 export default function App() {
-  // App view navigation
-  const [currentView, setCurrentView] = useState<'public' | 'admin' | 'student_portal' | 'guardian_portal' | 'superadmin'>('public');
+  const initialEnvMode = detectEnvironmentMode();
+
+  // App view navigation: main site starts in 'public' (never opens unauthenticated demo dashboard);
+  // painel.tatameclub.com.br (or /painel) starts directly in 'superadmin' gated by PlatformAdminAuthView.
+  const [currentView, setCurrentView] = useState<'public' | 'admin' | 'student_portal' | 'guardian_portal' | 'superadmin'>(
+    initialEnvMode === 'saas_admin_panel' ? 'superadmin' : 'public'
+  );
   const [adminTab, setAdminTab] = useState<AdminViewTab>('overview');
 
   // Modals state
@@ -86,10 +95,10 @@ export default function App() {
   const [selectedClassForAttendance, setSelectedClassForAttendance] = useState<ClassGroup | null>(null);
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
 
-  // Active Session context
+  // Active Session context (unauthenticated by default on public site)
   const [currentTenantId, setCurrentTenantId] = useState<string>('tenant-kodokan');
   const [currentBranchId, setCurrentBranchId] = useState<string>('branch-matriz');
-  const [currentUserId, setCurrentUserId] = useState<string>('user-owner');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
 
   // Data Store States
   const [plans, setPlans] = useState<SaaSPlan[]>(() => DataStore.getPlans());
@@ -288,11 +297,11 @@ export default function App() {
 
   const fallbackTenant: Tenant = {
     id: currentTenantId || 'tenant-kodokan',
-    tradeName: 'TatameHub Dojo',
-    legalName: 'TatameHub Dojo Ltda',
+    tradeName: 'Tatame Club Dojo',
+    legalName: 'Tatame Club Dojo Ltda',
     cnpjOrCpf: '00.000.000/0001-00',
     adminName: 'Sensei Administrador',
-    email: 'contato@tatamehub.com.br',
+    email: 'contato@tatameclub.com.br',
     phone: '(11) 98888-0000',
     whatsapp: '(11) 98888-0000',
     address: {
@@ -321,14 +330,15 @@ export default function App() {
 
   const activeTenant: Tenant = tenants.find(t => t.id === currentTenantId) || tenants[0] || fallbackTenant;
   const tenantBranches = branches.filter(b => b.tenantId === currentTenantId);
-  const currentUser: User = users.find(u => u.id === currentUserId) || users[1] || users[0] || {
-    id: currentUserId || 'user-owner',
+  const authenticatedUserRecord = currentUserId ? users.find(u => u.id === currentUserId) || null : null;
+  const currentUser: User = authenticatedUserRecord || {
+    id: '',
     tenantId: currentTenantId,
-    name: 'Administrador',
-    email: 'admin@tatamehub.com.br',
-    role: 'owner',
+    name: 'Visitante',
+    email: '',
+    role: 'student',
     phone: '',
-    active: true,
+    active: false,
   };
 
   // Supabase Auth Session listener
@@ -474,7 +484,8 @@ export default function App() {
     if (isSupabaseConfigured()) {
       await authService.signOut();
     }
-    setCurrentView('public');
+    setCurrentUserId('');
+    setCurrentView(detectEnvironmentMode() === 'saas_admin_panel' ? 'superadmin' : 'public');
   };
 
   // Handlers for User Switching & Login
@@ -526,19 +537,11 @@ export default function App() {
     }
   };
 
-  // Handlers for Registration (Modo local de demonstração)
+  // Handlers for Registration (Provisionamento isolado de nova academia)
   const handleRegisterSuccess = (newTenant: Tenant, newBranch: Branch, newUser: User) => {
-    const updatedTenants = [...tenants, newTenant];
-    const updatedBranches = [...branches, newBranch];
-    const updatedUsers = [...users, newUser];
-
-    DataStore.saveTenants(updatedTenants);
-    DataStore.saveBranches(updatedBranches);
-    DataStore.saveUsers(updatedUsers);
-
-    setTenants(updatedTenants);
-    setBranches(updatedBranches);
-    setUsers(updatedUsers);
+    setTenants(DataStore.getTenants());
+    setBranches(DataStore.getBranches());
+    setUsers(DataStore.getUsers());
 
     setCurrentTenantId(newTenant.id);
     setCurrentBranchId(newBranch.id);
@@ -546,16 +549,6 @@ export default function App() {
     setIsRegisterOpen(false);
     setCurrentView('admin');
     setAdminTab('overview');
-
-    DataStore.logAudit(
-      newTenant.id,
-      newUser.id,
-      newUser.name,
-      'Criação de Conta',
-      'Tenant',
-      newTenant.id,
-      `Nova academia "${newTenant.tradeName}" cadastrada com 10 dias de teste grátis.`
-    );
   };
 
   // Handlers for Student Creation
@@ -691,13 +684,12 @@ export default function App() {
   };
 
   const handleOpenCreateStudent = () => {
-    // Validação estrita dos limites do plano comercial contratado
-    const commPlans = DataStore.getCommercialPlans();
-    const currentPlan = commPlans.find(p => p.id === activeTenant.planId);
-    const maxStudents = currentPlan?.maxStudents || (activeTenant.planId === 'basic' ? 100 : 500);
+    // Validação estrita dos limites efetivos da licença (plano ou limite customizado)
+    const effectiveLimits = saasPlatformService.getEffectiveLimits(activeTenant.id);
+    const maxStudents = effectiveLimits.maxStudents;
 
     if (students.length >= maxStudents && currentUser.role !== 'superadmin') {
-      alert(`Limite de alunos cadastrados atingido para o plano ${currentPlan?.name || activeTenant.planId.toUpperCase()} (${students.length}/${maxStudents} alunos). Faça upgrade do seu plano para continuar matriculando.`);
+      alert(`Limite de alunos cadastrados atingido para sua licença (${students.length}/${maxStudents} alunos). Faça upgrade do seu plano para continuar matriculando.`);
       setIsUpgradePlanOpen(true);
       return;
     }
@@ -1532,6 +1524,17 @@ export default function App() {
             />
           )}
 
+          {adminTab === 'team_users' && (
+            <TeamUsersView
+              tenant={activeTenant}
+              currentUser={currentUser}
+              branches={tenantBranches}
+              selectedBranchId={currentBranchId}
+              onOpenPlanUpgrade={() => setIsUpgradePlanOpen(true)}
+              onUserUpdated={() => setUsers(DataStore.getUsers())}
+            />
+          )}
+
           {adminTab === 'reports' && (
             <ReportsView
               tenant={activeTenant}
@@ -1611,47 +1614,43 @@ export default function App() {
         </StudentLayout>
       )}
 
-      {/* VIEW 5: CENTRAL SAAS SUPERADMIN CONSOLE */}
+      {/* VIEW 5: CENTRAL SAAS SUPERADMIN CONSOLE (PAINEL.TATAMECLUB.COM.BR) */}
       {currentView === 'superadmin' && (
-        currentUser.role !== 'superadmin' ? (
-          <div className="min-h-screen p-8 bg-slate-950 flex items-center justify-center">
-            <div className="max-w-md w-full bg-slate-900 border border-rose-500/40 p-6 rounded-3xl text-center space-y-4 shadow-2xl">
-              <div className="h-14 w-14 mx-auto rounded-2xl bg-rose-950/80 border border-rose-500/40 text-rose-400 flex items-center justify-center font-bold text-lg">
-                403
-              </div>
-              <h2 className="text-lg font-bold text-white">Acesso Exclusivo ao Proprietário do SaaS</h2>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                O papel <strong>{currentUser.role}</strong> da academia não possui autorização para administrar a plataforma global, planos comerciais ou assinaturas de terceiros.
-              </p>
-              <div className="pt-2">
-                <button
-                  onClick={() => setCurrentView('admin')}
-                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-xs transition-colors cursor-pointer"
-                >
-                  Voltar ao Painel da Academia
-                </button>
-              </div>
-            </div>
-          </div>
+        (!authenticatedUserRecord ||
+          currentUser.role !== 'superadmin' ||
+          !isAuthorizedPlatformOwnerEmail(currentUser.email)) ? (
+          <PlatformAdminAuthView
+            currentUser={authenticatedUserRecord}
+            onAuthenticatedSuperAdmin={(superAdminUser) => {
+              setUsers(DataStore.getUsers());
+              setCurrentUserId(superAdminUser.id);
+              setCurrentView('superadmin');
+            }}
+            onReturnToMainSite={() => {
+              if (window.location.pathname.startsWith('/painel') || window.location.search.includes('env=painel')) {
+                window.history.pushState({}, '', '/');
+              }
+              setCurrentView(authenticatedUserRecord ? 'admin' : 'public');
+            }}
+          />
         ) : (
           <div className="min-h-screen p-4 sm:p-6 lg:p-8 bg-slate-950">
             <div className="max-w-7xl mx-auto flex items-center justify-between pb-6 border-b border-slate-800 mb-6">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-white">TatameHub Central</span>
-                <span className="text-xs bg-red-600 px-2 py-0.5 rounded text-white font-semibold">SuperAdmin</span>
+              <div className="flex items-center gap-2.5">
+                <span className="font-bold text-lg text-white">Tatame Club · SaaS Control</span>
+                <span className="text-xs bg-amber-500 text-slate-950 px-2.5 py-0.5 rounded font-bold">
+                  {OFFICIAL_DOMAINS.saasAdminHost}
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsLoginOpen(true)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300 hover:text-white cursor-pointer"
-                >
-                  Trocar Persona
-                </button>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 hidden sm:inline">
+                  Autenticado como: <strong className="text-amber-400">{currentUser.email}</strong>
+                </span>
                 <button
                   onClick={handleLogout}
-                  className="px-3 py-1.5 rounded-lg bg-red-600 text-xs font-semibold text-white hover:bg-red-500 cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-lg bg-red-600 text-xs font-semibold text-white hover:bg-red-500 cursor-pointer"
                 >
-                  Sair / Desconectar
+                  Encerrar Sessão Global
                 </button>
               </div>
             </div>
@@ -1664,6 +1663,8 @@ export default function App() {
               onUpdateTenantStatus={handleUpdateTenantStatus}
               onSwitchTenant={(tId) => {
                 setCurrentTenantId(tId);
+                const tBranches = branches.filter(b => b.tenantId === tId);
+                if (tBranches[0]) setCurrentBranchId(tBranches[0].id);
                 setCurrentView('admin');
                 setAdminTab('overview');
               }}
@@ -1690,6 +1691,10 @@ export default function App() {
         users={users}
         onSelectUser={handleSelectUser}
         onAuthSuccess={handleAuthSuccess}
+        onOpenRegister={() => {
+          setIsLoginOpen(false);
+          setIsRegisterOpen(true);
+        }}
       />
 
       <StudentFormModal

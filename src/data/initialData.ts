@@ -41,6 +41,7 @@ export const INITIAL_SAAS_PLANS: SaaSPlan[] = [
     trialDays: 10,
     maxStudents: 40,
     maxBranches: 2,
+    maxUsers: 5,
     maxStorageGb: 5,
     features: {
       digitalLibrary: true,
@@ -59,6 +60,7 @@ export const INITIAL_SAAS_PLANS: SaaSPlan[] = [
     trialDays: 0,
     maxStudents: 100,
     maxBranches: 1,
+    maxUsers: 5,
     maxStorageGb: 10,
     features: {
       digitalLibrary: false,
@@ -77,6 +79,7 @@ export const INITIAL_SAAS_PLANS: SaaSPlan[] = [
     trialDays: 0,
     maxStudents: 500,
     maxBranches: 5,
+    maxUsers: 20,
     maxStorageGb: 50,
     features: {
       digitalLibrary: true,
@@ -253,8 +256,8 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'user-superadmin',
     tenantId: 'platform',
-    name: 'Carlos Gestor SaaS',
-    email: 'admin@tatamehub.com.br',
+    name: 'Proprietário Tatame Club',
+    email: 'admin@tatameclub.com.br',
     role: 'superadmin',
     phone: '(11) 99999-0000',
     active: true,
@@ -1383,7 +1386,7 @@ export const INITIAL_INVOICES: Invoice[] = [
       {
         date: '2026-10-01T08:00:00Z',
         action: 'Emissão automática de mensalidade',
-        userName: 'Sistema SaaS TatameHub',
+        userName: 'Sistema SaaS Tatame Club',
       },
       {
         date: '2026-10-08T14:32:10Z',
@@ -1419,7 +1422,7 @@ export const INITIAL_INVOICES: Invoice[] = [
       {
         date: '2026-10-01T08:00:00Z',
         action: 'Emissão com desconto familiar aplicado',
-        userName: 'Sistema SaaS TatameHub',
+        userName: 'Sistema SaaS Tatame Club',
       },
       {
         date: '2026-10-08T14:32:10Z',
@@ -1450,7 +1453,7 @@ export const INITIAL_INVOICES: Invoice[] = [
       {
         date: '2026-10-01T08:00:00Z',
         action: 'Emissão regular de mensalidade',
-        userName: 'Sistema SaaS TatameHub',
+        userName: 'Sistema SaaS Tatame Club',
       },
       {
         date: '2026-10-11T00:01:00Z',
@@ -2033,7 +2036,7 @@ export const INITIAL_COMMERCIAL_PLANS: SaaSCommercialPlan[] = [
     id: 'trial',
     name: 'Degustação Gratuita (10 Dias)',
     description: 'Acesso completo a todas as funcionalidades do sistema para testar com turmas reais sem necessidade de cartão de crédito.',
-    tagline: 'Experimente sem compromisso com suporte do time TatameHub.',
+    tagline: 'Experimente sem compromisso com suporte do time Tatame Club.',
     price: 0,
     currency: 'BRL',
     billingCycle: 'monthly',
@@ -2041,6 +2044,7 @@ export const INITIAL_COMMERCIAL_PLANS: SaaSCommercialPlan[] = [
     trialDays: 10,
     maxStudents: 40,
     maxBranches: 2,
+    maxUsers: 5,
     maxStorageGb: 5,
     features: {
       digitalLibrary: true,
@@ -2067,6 +2071,7 @@ export const INITIAL_COMMERCIAL_PLANS: SaaSCommercialPlan[] = [
     trialDays: 0,
     maxStudents: 100,
     maxBranches: 1,
+    maxUsers: 5,
     maxStorageGb: 10,
     features: {
       digitalLibrary: false,
@@ -2093,6 +2098,7 @@ export const INITIAL_COMMERCIAL_PLANS: SaaSCommercialPlan[] = [
     trialDays: 0,
     maxStudents: 500,
     maxBranches: 5,
+    maxUsers: 20,
     maxStorageGb: 50,
     features: {
       digitalLibrary: true,
@@ -2119,6 +2125,7 @@ export const INITIAL_COMMERCIAL_PLANS: SaaSCommercialPlan[] = [
     trialDays: 0,
     maxStudents: 2000,
     maxBranches: 20,
+    maxUsers: 100,
     maxStorageGb: 200,
     features: {
       digitalLibrary: true,
@@ -2227,7 +2234,7 @@ export const INITIAL_SAAS_PAYMENTS: SaaSPayment[] = [
     billingPeriodStart: '2026-10-01',
     billingPeriodEnd: '2026-10-31',
     invoiceUrl: 'https://asaas.com/i/99812738',
-    pixCopyPaste: '00020126580014br.gov.bcb.pix013699812738-tatamehub5204000053039865406299.005802BR5910TatameHub6009Sao Paulo62070503***6304ABCD',
+    pixCopyPaste: '00020126580014br.gov.bcb.pix013699812738-tatameclub5204000053039865406299.005802BR5910TatameClub6009Sao Paulo62070503***6304ABCD',
     notes: 'Pagamento confirmado via webhook PIX instantâneo.',
     createdAt: '2026-09-25T10:00:00Z',
     updatedAt: '2026-10-01T14:15:22Z',

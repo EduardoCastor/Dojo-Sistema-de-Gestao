@@ -39,9 +39,9 @@ export const TenantAccessRestrictedView: React.FC<TenantAccessRestrictedViewProp
   const [copiedPix, setCopiedPix] = React.useState(false);
 
   const mockPixPayload =
-    '00020126580014br.gov.bcb.pix0136tatamehub-mensalidade-saas5204000053039865406' +
+    '00020126580014br.gov.bcb.pix0136tatameclub-mensalidade-saas5204000053039865406' +
     (subscription?.amount || 149.0).toFixed(2) +
-    '5802BR5910TatameHub6009Sao Paulo62070503***6304A1B2';
+    '5802BR5910TatameClub6009Sao Paulo62070503***6304A1B2';
 
   const handleCopyPix = () => {
     navigator.clipboard?.writeText(mockPixPayload);
@@ -162,7 +162,7 @@ export const TenantAccessRestrictedView: React.FC<TenantAccessRestrictedViewProp
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5">
               <Mail className="h-3.5 w-3.5 text-slate-500" />
-              <span>suporte@tatamehub.com.br</span>
+              <span>suporte@tatameclub.com.br</span>
             </span>
           </div>
 

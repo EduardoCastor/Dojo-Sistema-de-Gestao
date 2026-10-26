@@ -78,7 +78,7 @@ export const FeaturesSection: React.FC = () => {
             Construído para a rotina real de um dojo de artes marciais
           </h2>
           <p className="mt-3 text-sm sm:text-base text-slate-400 leading-relaxed">
-            Nada de sistemas genéricos de musculação adaptados à força. O TatameHub entende de kumi-kata, faixas, graus, federações e a dinâmica pedagógica dos esportes de combate.
+            Nada de sistemas genéricos de musculação adaptados à força. O Tatame Club entende de kumi-kata, faixas, graus, federações e a dinâmica pedagógica dos esportes de combate.
           </p>
         </div>
 
