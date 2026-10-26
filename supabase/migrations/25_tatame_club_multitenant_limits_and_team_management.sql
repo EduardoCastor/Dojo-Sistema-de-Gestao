@@ -646,9 +646,11 @@ $$;
 -- 10. PROCEDIMENTO SEGURO DE BOOTSTRAP DO ADMINISTRADOR GLOBAL (admin@tatameclub.com.br)
 -- IMPORTANTE:
 --  - Não contém senha fixa nem cria credenciais padrão.
---  - Não permite que um usuário comum se autopromova pelo navegador.
---  - Só pode ser invocado por sessão administrativa do banco (postgres / service_role)
---    ou por um SuperAdmin já autenticado.
+--  - Permite o bootstrap inicial apenas para o e-mail oficial admin@tatameclub.com.br
+--    quando ainda não existe nenhum is_platform_admin = true no banco, ou quando executado
+--    pelo próprio admin@tatameclub.com.br / SQL Editor (postgres / service_role).
+--  - Confirma automaticamente email_confirmed_at para admin@tatameclub.com.br caso o
+--    domínio de e-mail ainda não esteja publicado em produção.
 CREATE OR REPLACE FUNCTION public.bootstrap_platform_owner_by_email(
   p_email text DEFAULT 'admin@tatameclub.com.br',
   p_reason text DEFAULT 'Bootstrap inicial do proprietário da plataforma Tatame Club'
@@ -660,29 +662,51 @@ SET search_path = public, auth
 AS $$
 DECLARE
   v_target_user record;
+  v_has_existing_admin boolean := false;
+  v_jwt_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
 BEGIN
-  -- Exigir contexto administrativo privilegiado (SQL Editor / service_role / SuperAdmin existente)
-  IF current_setting('role', true) NOT IN ('service_role', 'postgres', 'supabase_admin')
-     AND NOT public.is_platform_admin() THEN
-    RAISE EXCEPTION 'Operação restrita: o bootstrap de Administrador Global deve ser executado exclusivamente no ambiente administrativo seguro (Service Role / SQL Editor).'
+  -- Apenas o e-mail oficial do proprietário pode receber bootstrap
+  IF lower(trim(p_email)) <> 'admin@tatameclub.com.br' THEN
+    RAISE EXCEPTION 'Operação negada: o bootstrap global é exclusivo para admin@tatameclub.com.br.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles WHERE is_platform_admin = true
+  ) INTO v_has_existing_admin;
+
+  -- Se já existir um admin global configurado, exigir contexto privilegiado ou o próprio admin@tatameclub.com.br autenticado
+  IF v_has_existing_admin
+     AND current_setting('role', true) NOT IN ('service_role', 'postgres', 'supabase_admin')
+     AND NOT public.is_platform_admin()
+     AND v_jwt_email <> 'admin@tatameclub.com.br' THEN
+    RAISE EXCEPTION 'Operação restrita: o Administrador Global já foi inicializado. Execute alterações pelo SQL Editor ou autenticado como admin@tatameclub.com.br.'
       USING ERRCODE = '42501';
   END IF;
 
   SELECT id, email, email_confirmed_at, raw_user_meta_data
   INTO v_target_user
   FROM auth.users
-  WHERE lower(email) = lower(trim(p_email))
+  WHERE lower(email) = 'admin@tatameclub.com.br'
   LIMIT 1;
 
   IF v_target_user.id IS NULL THEN
-    RAISE EXCEPTION 'A conta "%" ainda não existe em auth.users. Crie a conta primeiro pelo Supabase Auth (com senha definida pelo próprio administrador) antes de vincular o papel global.', p_email;
+    RAISE EXCEPTION 'A conta "admin@tatameclub.com.br" ainda não existe em auth.users. Utilize a aba "Primeiro Acesso" na tela do painel para definir sua senha antes de vincular o papel global.';
+  END IF;
+
+  -- Auto-confirmar o e-mail de admin@tatameclub.com.br caso o domínio ainda não tenha servidor de e-mail ativo
+  IF v_target_user.email_confirmed_at IS NULL THEN
+    UPDATE auth.users
+    SET email_confirmed_at = now(),
+        updated_at = now()
+    WHERE id = v_target_user.id;
   END IF;
 
   -- Garantir perfil e ativar a flag is_platform_admin
   INSERT INTO public.profiles (id, full_name, is_platform_admin, updated_at)
   VALUES (
     v_target_user.id,
-    COALESCE(v_target_user.raw_user_meta_data->>'full_name', 'Administrador Global Tatame Club'),
+    COALESCE(v_target_user.raw_user_meta_data->>'full_name', 'Proprietário Tatame Club SaaS'),
     true,
     now()
   )
@@ -707,8 +731,8 @@ BEGIN
     'gateway',
     v_target_user.id::text,
     p_reason,
-    format('Privilégio de Proprietário Global (is_platform_admin = true) vinculado com segurança à conta verificada %s.', v_target_user.email),
-    jsonb_build_object('bootstrapped_email', v_target_user.email, 'email_confirmed', (v_target_user.email_confirmed_at IS NOT NULL))
+    format('Privilégio de Proprietário Global (is_platform_admin = true) vinculado com segurança à conta %s.', v_target_user.email),
+    jsonb_build_object('bootstrapped_email', v_target_user.email, 'email_confirmed', true)
   );
 
   RETURN jsonb_build_object(
@@ -719,3 +743,6 @@ BEGIN
   );
 END;
 $$;
+
+GRANT EXECUTE ON FUNCTION public.bootstrap_platform_owner_by_email(text, text) TO anon, authenticated, service_role;
+

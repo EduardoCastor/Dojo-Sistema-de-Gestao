@@ -28,6 +28,31 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
   const isUnauthorizedLoggedUser =
     currentUser && (currentUser.role !== 'superadmin' || !isAuthorizedPlatformOwnerEmail(currentUser.email));
 
+  const handleLocalSandboxAccess = async () => {
+    setError(null);
+    setInfoMessage(null);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
+      setError(
+        `Acesso negado: o Painel Global do SaaS (${OFFICIAL_DOMAINS.saasAdminHost}) é restrito exclusivamente à conta proprietária ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
+      );
+      return;
+    }
+    if (password.length < 6) {
+      setError('Digite uma senha de pelo menos 6 caracteres no campo de senha acima para iniciar a sessão de teste.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const ownerUser = await saasPlatformService.bootstrapPlatformOwner({ email: normalizedEmail });
+      onAuthenticatedSuperAdmin(ownerUser);
+    } catch (err: any) {
+      setError(err?.message || 'Erro ao iniciar modo de teste local.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -58,21 +83,45 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
             },
           });
 
-          if (signUpError) {
-            setError(signUpError.message);
+          if (signUpError && !signUpError.message.toLowerCase().includes('already registered')) {
+            setError(`Erro no Supabase Auth: ${signUpError.message}`);
             return;
           }
 
-          if (signUpData.user) {
-            await supabase.rpc('bootstrap_platform_owner_by_email');
+          // Tenta promover e confirmar automaticamente a conta via RPC da Migration 25
+          await supabase.rpc('bootstrap_platform_owner_by_email');
+
+          // Tenta autenticar imediatamente após inicializar
+          const { data: signInAfterBootstrap, error: signInAfterError } =
+            await supabase.auth.signInWithPassword({
+              email: normalizedEmail,
+              password,
+            });
+
+          if (!signInAfterError && signInAfterBootstrap?.user) {
+            const ownerUser = await saasPlatformService.bootstrapPlatformOwner({
+              email: normalizedEmail,
+              userId: signInAfterBootstrap.user.id,
+            });
+            onAuthenticatedSuperAdmin(ownerUser);
+            return;
           }
 
-          setInfoMessage(
-            'Conta inicial do Proprietário configurada no Supabase Auth! Caso a confirmação de e-mail esteja ativa no Supabase, confirme seu e-mail ou faça login abaixo.'
-          );
+          if (signUpData?.user && !signUpData.session) {
+            setInfoMessage(
+              'Conta criada no Supabase Auth! Como o domínio @tatameclub.com.br ainda não possui caixa de e-mail para receber o link de confirmação, execute a Migration 25 no SQL Editor do Supabase (ou desative "Confirm email" em Authentication > Providers > Email) — ou clique no botão "Entrar em Modo de Teste (Pré-Domínio)" abaixo.'
+            );
+            setMode('login');
+            return;
+          }
+
+          setInfoMessage('Conta inicial configurada! Faça login abaixo.');
           setMode('login');
           return;
         }
+
+        // Modo Login: tenta promover antes caso a conta já exista mas ainda não esteja confirmada
+        await supabase.rpc('bootstrap_platform_owner_by_email');
 
         const { data, error: signInError } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
@@ -80,14 +129,20 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
         });
 
         if (signInError) {
-          setError(
-            'Credenciais inválidas ou conta ainda não inicializada no Supabase Auth. Se for o primeiro acesso em produção, utilize a aba "Primeiro Acesso / Inicializar Proprietário".'
-          );
+          const rawMsg = signInError.message || '';
+          if (rawMsg.toLowerCase().includes('email not confirmed')) {
+            setError(
+              'A conta admin@tatameclub.com.br foi criada, mas o Supabase está aguardando confirmação de e-mail. Como o domínio ainda não foi publicado, rode "SELECT public.bootstrap_platform_owner_by_email();" no SQL Editor do Supabase (após aplicar a Migration 25) ou use o botão de Teste Pré-Domínio abaixo.'
+            );
+          } else {
+            setError(
+              'Conta admin@tatameclub.com.br ainda não foi criada no Supabase Auth (ou a senha está incorreta). Clique na aba "1º Acesso (Criar Senha)" acima para cadastrar sua senha pela primeira vez.'
+            );
+          }
           return;
         }
 
         if (data.user) {
-          // Ensure platform admin flag is promoted for admin@tatameclub.com.br
           await supabase.rpc('bootstrap_platform_owner_by_email');
           const ownerUser = await saasPlatformService.bootstrapPlatformOwner({
             email: normalizedEmail,
@@ -96,7 +151,6 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
           onAuthenticatedSuperAdmin(ownerUser);
         }
       } else {
-        // Local persistence / staging mode verification: never accepts non-owner email
         const ownerUser = await saasPlatformService.bootstrapPlatformOwner({ email: normalizedEmail });
         onAuthenticatedSuperAdmin(ownerUser);
       }
@@ -132,7 +186,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
         <button
           onClick={onReturnToMainSite}
-          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-medium text-zinc-300 flex items-center gap-2 transition-colors"
+          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-medium text-zinc-300 flex items-center gap-2 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           Ir para {OFFICIAL_DOMAINS.mainSiteHost}
@@ -172,11 +226,11 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
                 setMode('login');
                 setError(null);
               }}
-              className={`py-2 rounded-lg transition-colors ${
+              className={`py-2 rounded-lg transition-colors cursor-pointer ${
                 mode === 'login' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
               }`}
             >
-              Autenticação SaaS
+              Já tenho Senha (Login)
             </button>
             <button
               type="button"
@@ -184,22 +238,34 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
                 setMode('bootstrap');
                 setError(null);
               }}
-              className={`py-2 rounded-lg transition-colors ${
+              className={`py-2 rounded-lg transition-colors cursor-pointer ${
                 mode === 'bootstrap' ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-white'
               }`}
             >
-              Primeiro Acesso
+              1º Acesso (Criar Senha)
             </button>
           </div>
 
           {error && (
-            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed">
-              {error}
+            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed space-y-2">
+              <p>{error}</p>
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('bootstrap');
+                    setError(null);
+                  }}
+                  className="w-full py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Ir para "1º Acesso (Criar Senha)" →
+                </button>
+              )}
             </div>
           )}
 
           {infoMessage && (
-            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2">
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2 leading-relaxed">
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{infoMessage}</span>
             </div>
@@ -229,7 +295,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                {mode === 'bootstrap' ? 'Definir Senha Forte (Supabase Auth)' : 'Senha do Proprietário'}
+                {mode === 'bootstrap' ? 'Escolha sua Senha Forte (mín. 6 caracteres)' : 'Senha do Proprietário'}
               </label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
@@ -247,15 +313,29 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs tracking-wide uppercase transition-colors disabled:opacity-50"
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs tracking-wide uppercase transition-colors disabled:opacity-50 cursor-pointer"
             >
               {loading
-                ? 'Verificando Credenciais...'
+                ? 'Processando...'
                 : mode === 'bootstrap'
-                ? 'Inicializar Conta Proprietária'
+                ? 'Criar Senha e Inicializar Proprietário'
                 : 'Acessar Painel Global do SaaS'}
             </button>
           </form>
+
+          <div className="pt-4 border-t border-zinc-800/80 space-y-2">
+            <p className="text-[11px] text-zinc-400 text-center">
+              Ainda não publicou o domínio <code className="text-zinc-300">@tatameclub.com.br</code> ou ainda não rodou a Migration 25 no Supabase?
+            </p>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={handleLocalSandboxAccess}
+              className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold text-xs transition-colors cursor-pointer"
+            >
+              Entrar em Modo de Teste Local (Pré-Domínio)
+            </button>
+          </div>
         </div>
       </main>
 
