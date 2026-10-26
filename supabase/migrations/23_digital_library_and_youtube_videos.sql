@@ -82,9 +82,11 @@ USING (
             AND (public.is_own_student(st.id) OR public.is_guardian_of_student(st.id))
             AND (
               EXISTS (
-                SELECT 1 FROM public.enrollments en
+                SELECT 1 
+                FROM public.enrollments en
+                JOIN public.class_groups cg ON cg.id = en.class_group_id
                 WHERE en.student_id = st.id
-                  AND en.martial_art_id = public.digital_library_videos.martial_art_id
+                  AND cg.martial_art_id = public.digital_library_videos.martial_art_id
                   AND en.status = 'active'
               )
               OR EXISTS (
@@ -340,8 +342,9 @@ BEGIN
   RETURN QUERY
   WITH student_active_arts AS (
     -- Modalidades em que o aluno possui matrícula ativa ou graduação registrada
-    SELECT DISTINCT en.martial_art_id
+    SELECT DISTINCT cg.martial_art_id
     FROM public.enrollments en
+    JOIN public.class_groups cg ON cg.id = en.class_group_id
     WHERE en.student_id = p_student_id
       AND en.tenant_id = p_tenant_id
       AND en.status = 'active'
