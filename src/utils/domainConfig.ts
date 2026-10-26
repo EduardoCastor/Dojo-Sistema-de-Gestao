@@ -33,7 +33,8 @@ export type AppEnvironmentMode = 'main_site' | 'saas_admin_panel';
 export function detectEnvironmentMode(
   hostname?: string,
   pathname?: string,
-  search?: string
+  search?: string,
+  hash?: string
 ): AppEnvironmentMode {
   const host = (
     hostname ?? (typeof window !== 'undefined' ? window.location.hostname : '')
@@ -43,6 +44,9 @@ export function detectEnvironmentMode(
   ).toLowerCase();
   const query =
     search ?? (typeof window !== 'undefined' ? window.location.search : '');
+  const urlHash = (
+    hash ?? (typeof window !== 'undefined' ? window.location.hash : '')
+  ).toLowerCase();
 
   if (
     host === OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL ||
@@ -51,7 +55,16 @@ export function detectEnvironmentMode(
     return 'saas_admin_panel';
   }
 
-  if (path === '/painel' || path.startsWith('/painel/')) {
+  if (
+    path === '/painel' ||
+    path.startsWith('/painel/') ||
+    path.endsWith('/painel') ||
+    path.includes('/painel/')
+  ) {
+    return 'saas_admin_panel';
+  }
+
+  if (urlHash === '#painel' || urlHash === '#/painel') {
     return 'saas_admin_panel';
   }
 

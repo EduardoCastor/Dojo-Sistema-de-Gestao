@@ -1,7 +1,11 @@
 import React from 'react';
-import { Shield } from 'lucide-react';
+import { Shield, Lock } from 'lucide-react';
 
-export const PublicFooter: React.FC = () => {
+interface PublicFooterProps {
+  onOpenSaaSPanel?: () => void;
+}
+
+export const PublicFooter: React.FC<PublicFooterProps> = ({ onOpenSaaSPanel }) => {
   return (
     <footer className="border-t border-slate-800 bg-slate-950 text-slate-400 py-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -57,12 +61,26 @@ export const PublicFooter: React.FC = () => {
 
         <div className="border-t border-slate-900 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <p>© {new Date().getFullYear()} Tatame Club. Todos os direitos reservados. Feito para o ecossistema de artes marciais brasileiro.</p>
-          <div className="flex gap-6">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
             <span>Termos de Uso</span>
             <span>·</span>
             <span>Política de Privacidade</span>
             <span>·</span>
             <span>Suporte Técnico</span>
+            {onOpenSaaSPanel && (
+              <>
+                <span>·</span>
+                <button
+                  type="button"
+                  onClick={onOpenSaaSPanel}
+                  className="inline-flex items-center gap-1.5 text-amber-400/80 hover:text-amber-300 transition-colors cursor-pointer"
+                  title="Acesso restrito ao Proprietário do SaaS (painel.tatameclub.com.br)"
+                >
+                  <Lock className="h-3 w-3" />
+                  <span>Painel SaaS (painel.tatameclub.com.br)</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

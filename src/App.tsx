@@ -1312,7 +1312,18 @@ export default function App() {
             />
             <FAQSection />
           </main>
-          <PublicFooter />
+          <PublicFooter
+            onOpenSaaSPanel={() => {
+              try {
+                const basePath = window.location.pathname || '/';
+                window.history.pushState({}, '', `${basePath}?env=painel`);
+              } catch {
+                // ignore history errors in sandboxed iframes
+              }
+              setCurrentView('superadmin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         </>
       )}
 
@@ -1627,8 +1638,11 @@ export default function App() {
               setCurrentView('superadmin');
             }}
             onReturnToMainSite={() => {
-              if (window.location.pathname.startsWith('/painel') || window.location.search.includes('env=painel')) {
-                window.history.pushState({}, '', '/');
+              try {
+                const cleanPath = (window.location.pathname || '/').replace(/\/painel\/?$/i, '/') || '/';
+                window.history.pushState({}, '', cleanPath);
+              } catch {
+                // ignore history errors in sandboxed iframes
               }
               setCurrentView(authenticatedUserRecord ? 'admin' : 'public');
             }}
