@@ -1,363 +1,432 @@
-import React, { useState } from 'react';
-import { BookOpen, Video, FileText, Plus, Search, Eye, Lock, Shield, Check } from 'lucide-react';
-import { DigitalLibraryItem, BeltRank } from '../../types';
-import { formatDateBR } from '../../utils/formatters';
+import React, { useState, useMemo } from 'react';
+import {
+  Video,
+  Plus,
+  Search,
+  Play,
+  Edit2,
+  Trash2,
+  Lock,
+  Globe,
+  Archive,
+  CheckCircle,
+  Clock,
+  Layers,
+  Filter,
+} from 'lucide-react';
+import { DigitalLibraryItem, BeltRank, MartialArt, SaveVideoPayload } from '../../types';
+import { VideoFormModal } from './VideoFormModal';
+import { YouTubePlayerModal } from '../common/YouTubePlayerModal';
+import { digitalLibraryService } from '../../services/digitalLibraryService';
 
 interface DigitalLibraryViewProps {
   libraryItems: DigitalLibraryItem[];
   beltRanks: BeltRank[];
-  onAddLibraryItem: (item: DigitalLibraryItem) => void;
+  martialArts?: MartialArt[];
+  tenantId?: string;
+  onAddLibraryItem?: (item: DigitalLibraryItem) => void;
+  onRefresh?: () => void;
 }
 
 export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
-  libraryItems,
+  libraryItems: initialItems,
   beltRanks,
+  martialArts = [],
+  tenantId = 'tenant-kodokan',
   onAddLibraryItem,
+  onRefresh,
 }) => {
+  const [items, setItems] = useState<DigitalLibraryItem[]>(initialItems);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedArtFilter, setSelectedArtFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [activeItem, setActiveItem] = useState<DigitalLibraryItem | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  // New item form
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<DigitalLibraryItem['category']>('waza_techniques');
-  const [mediaType, setMediaType] = useState<'video' | 'pdf' | 'document'>('video');
-  const [mediaUrl, setMediaUrl] = useState('');
-  const [description, setDescription] = useState('');
-  const [accessScope, setAccessScope] = useState<'tenant_all' | 'restricted_belt'>('tenant_all');
+  // Modals state
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<DigitalLibraryItem | null>(null);
+  const [activePlayerVideo, setActivePlayerVideo] = useState<DigitalLibraryItem | null>(null);
+  const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
 
-  const filteredItems = libraryItems.filter((item) => {
-    const matchesSearch =
-      item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  // Sync when initialItems change
+  React.useEffect(() => {
+    setItems(initialItems);
+  }, [initialItems]);
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
+  // Fallback martial arts if none passed
+  const modalities = useMemo(() => {
+    if (martialArts && martialArts.length > 0) return martialArts;
+    return [
+      { id: 'art-judo', name: 'Judô' },
+      { id: 'art-bjj', name: 'Jiu-Jítsu' },
+    ] as MartialArt[];
+  }, [martialArts]);
 
-    const newItem: DigitalLibraryItem = {
-      id: `lib-${Date.now()}`,
-      tenantId: libraryItems[0]?.tenantId || 'tenant-kodokan',
-      title,
-      category,
-      mediaType,
-      mediaUrl: mediaUrl || '#conteudo-educacional',
-      description,
-      martialArtId: 'art-judo',
-      martialArtName: 'Judô',
-      targetBeltNames: ['Faixa Branca', 'Faixa Azul', 'Faixa Amarela'],
-      authorInstructor: 'Comissão Técnica',
-      publishedDate: new Date().toISOString().split('T')[0],
-      accessScope,
-      viewCount: 1,
-    };
+  // Filtered items
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      const matchesSearch =
+        item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.authorInstructor && item.authorInstructor.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    onAddLibraryItem(newItem);
-    setIsAddOpen(false);
-    setTitle('');
-    setDescription('');
+      const matchesArt =
+        selectedArtFilter === 'all' || item.martialArtId === selectedArtFilter;
+
+      const matchesCategory =
+        categoryFilter === 'all' || item.category === categoryFilter;
+
+      const itemStatus = item.status || 'published';
+      const matchesStatus =
+        statusFilter === 'all' || itemStatus === statusFilter;
+
+      return matchesSearch && matchesArt && matchesCategory && matchesStatus;
+    });
+  }, [items, searchTerm, selectedArtFilter, categoryFilter, statusFilter]);
+
+  // Action handlers
+  const handleOpenCreate = () => {
+    setEditingVideo(null);
+    setIsFormOpen(true);
+  };
+
+  const handleOpenEdit = (video: DigitalLibraryItem) => {
+    setEditingVideo(video);
+    setIsFormOpen(true);
+  };
+
+  const handleSaveVideo = async (payload: SaveVideoPayload) => {
+    const res = await digitalLibraryService.saveVideo(payload);
+    if (res.success) {
+      const refreshed = await digitalLibraryService.fetchVideos(tenantId);
+      setItems(refreshed);
+      if (onRefresh) onRefresh();
+    }
+  };
+
+  const handleDeleteConfirm = async (videoId: string) => {
+    if (!window.confirm('Tem certeza que deseja remover este vídeo da Biblioteca Digital?')) {
+      return;
+    }
+    setDeletingVideoId(videoId);
+    try {
+      await digitalLibraryService.deleteVideo(tenantId, videoId);
+      const refreshed = await digitalLibraryService.fetchVideos(tenantId);
+      setItems(refreshed);
+      if (onRefresh) onRefresh();
+    } finally {
+      setDeletingVideoId(null);
+    }
+  };
+
+  const handleStatusToggle = async (video: DigitalLibraryItem) => {
+    const nextStatus =
+      video.status === 'published'
+        ? 'draft'
+        : video.status === 'draft'
+        ? 'archived'
+        : 'published';
+
+    await digitalLibraryService.updateVideoStatus(tenantId, video.id, nextStatus);
+    const refreshed = await digitalLibraryService.fetchVideos(tenantId);
+    setItems(refreshed);
+    if (onRefresh) onRefresh();
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Biblioteca Digital de Artes Marciais</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">
+            Biblioteca Digital & Videoaulas do YouTube
+          </h2>
           <p className="text-xs text-slate-400">
-            Repositório de videoaulas técnicas, apostilas de kata, regras oficiais e materiais para exames de faixa.
+            Acervo didático de técnicas, katas, preparação física e regras organizado por modalidade e faixa.
           </p>
         </div>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={handleOpenCreate}
           className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-500 transition-colors shadow cursor-pointer"
         >
           <Plus className="h-4 w-4" />
-          <span>Publicar Material Técnico</span>
+          <span>Cadastrar Vídeo</span>
         </button>
       </div>
 
-      {/* Featured Banner with generated technique illustration */}
-      <div className="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/60 p-6 flex flex-col md:flex-row items-center gap-6">
-        <div className="w-full md:w-1/3 rounded-xl overflow-hidden border border-slate-700/80 shadow">
-          <img
-            src="/src/assets/images/martial_arts_technique_1792068010372.jpg"
-            alt="Treinamento Técnico de Judô e Kumi-Kata"
-            className="w-full h-44 object-cover"
-            referrerPolicy="no-referrer"
-          />
+      {/* Overview Stat Strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/60">
+          <div className="text-[11px] text-slate-400">Total de Vídeos</div>
+          <div className="text-xl font-bold text-white font-mono tabular-nums mt-0.5">
+            {items.length}
+          </div>
         </div>
-        <div className="flex-1 space-y-2">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/60 border border-red-500/30 px-2.5 py-0.5 rounded-full">
-            Destaque Pedagógico
-          </span>
-          <h3 className="text-base font-bold text-white">
-            Gokyo no Waza & Sequências de Exame 2026
-          </h3>
-          <p className="text-xs text-slate-300 leading-relaxed max-w-xl">
-            Apostilas completas com os princípios de kuzushi (desequilíbrio), tsukuri (encaixe) e kake (finalização), além de videoaulas gravadas pelos Senseis para estudo prévio dos alunos candidatos a exame.
-          </p>
-          <div className="flex items-center gap-4 text-[11px] text-slate-400 pt-2">
-            <span>4 Categorias didáticas</span>
-            <span>·</span>
-            <span>Acesso liberado no Portal do Aluno</span>
+        <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/60">
+          <div className="text-[11px] text-emerald-400">Publicados no Portal</div>
+          <div className="text-xl font-bold text-emerald-400 font-mono tabular-nums mt-0.5">
+            {items.filter((i) => i.status === 'published' || !i.status).length}
+          </div>
+        </div>
+        <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/60">
+          <div className="text-[11px] text-amber-400">Rascunhos Internos</div>
+          <div className="text-xl font-bold text-amber-400 font-mono tabular-nums mt-0.5">
+            {items.filter((i) => i.status === 'draft').length}
+          </div>
+        </div>
+        <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/60">
+          <div className="text-[11px] text-slate-400">Arquivados</div>
+          <div className="text-xl font-bold text-slate-300 font-mono tabular-nums mt-0.5">
+            {items.filter((i) => i.status === 'archived').length}
           </div>
         </div>
       </div>
 
-      {/* Search and Category Filters */}
-      <div className="flex flex-col sm:flex-row items-center gap-3">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Pesquisar técnicas, apostilas, kata ou regras..."
-            className="w-full rounded-lg border border-slate-800 bg-slate-900 pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
-          />
-        </div>
+      {/* Search and Filters Bar */}
+      <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 space-y-3">
+        <div className="flex flex-col md:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Pesquisar por título, técnica, descrição ou professor..."
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+            />
+          </div>
 
-        <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg text-xs overflow-x-auto">
-          {[
-            { id: 'all', label: 'Todos' },
-            { id: 'kata', label: 'Kata' },
-            { id: 'waza_techniques', label: 'Técnicas (Waza)' },
-            { id: 'rules_referee', label: 'Arbitragem' },
-            { id: 'physical_prep', label: 'Prep. Física' },
-          ].map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setCategoryFilter(cat.id)}
-              className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap cursor-pointer transition-colors ${
-                categoryFilter === cat.id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
-              }`}
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {/* Filter: Modality */}
+            <select
+              value={selectedArtFilter}
+              onChange={(e) => setSelectedArtFilter(e.target.value)}
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300 focus:border-red-500 focus:outline-none"
             >
-              {cat.label}
-            </button>
-          ))}
+              <option value="all">Todas as Modalidades</option>
+              {modalities.map((art) => (
+                <option key={art.id} value={art.id}>
+                  {art.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Filter: Category */}
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300 focus:border-red-500 focus:outline-none"
+            >
+              <option value="all">Todas as Categorias</option>
+              <option value="waza_techniques">Técnicas (Waza)</option>
+              <option value="kata">Katas Oficiais</option>
+              <option value="rules_referee">Arbitragem</option>
+              <option value="physical_prep">Prep. Física</option>
+              <option value="philosophy_history">Filosofia</option>
+              <option value="general">Geral</option>
+            </select>
+
+            {/* Filter: Status */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300 focus:border-red-500 focus:outline-none font-semibold"
+            >
+              <option value="all">Todas as Situações</option>
+              <option value="published">Apenas Publicados</option>
+              <option value="draft">Apenas Rascunhos</option>
+              <option value="archived">Apenas Arquivados</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Grid of Materials */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {filteredItems.map((item) => {
-          const isVideo = item.mediaType === 'video';
+      {/* Grid of Video Cards */}
+      {filteredItems.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filteredItems.map((item) => {
+            const statusLabel =
+              item.status === 'draft'
+                ? 'Rascunho'
+                : item.status === 'archived'
+                ? 'Arquivado'
+                : 'Publicado';
 
-          return (
-            <div
-              key={item.id}
-              className="flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5 hover:border-slate-700 transition-all group"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-800 border border-slate-700 text-red-400">
-                      {isVideo ? <Video className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                    </div>
-                    <span className="text-[11px] font-semibold text-slate-300 capitalize">
-                      {item.category.replace('_', ' ')}
-                    </span>
-                  </div>
+            const statusColor =
+              item.status === 'draft'
+                ? 'text-amber-400 bg-amber-950/80 border-amber-500/30'
+                : item.status === 'archived'
+                ? 'text-slate-400 bg-slate-800/80 border-slate-700'
+                : 'text-emerald-400 bg-emerald-950/80 border-emerald-500/30';
 
-                  {item.accessScope === 'restricted_belt' ? (
-                    <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
-                      <Lock className="h-3 w-3" />
-                      <span>Faixas Específicas</span>
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-                      Geral
-                    </span>
-                  )}
-                </div>
-
-                <h3 className="text-sm font-bold text-white mb-1.5 group-hover:text-red-400 transition-colors">
-                  {item.title}
-                </h3>
-                <p className="text-xs text-slate-400 line-clamp-2 mb-3">
-                  {item.description}
-                </p>
-
-                {item.targetBeltNames && item.targetBeltNames.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {item.targetBeltNames.map((bn, i) => (
-                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                        {bn}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-                <span>Por {item.authorInstructor}</span>
-                <button
-                  onClick={() => setActiveItem(item)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer"
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                  <span>Acessar</span>
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Viewer Modal */}
-      {activeItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200">
-            <button
-              onClick={() => setActiveItem(null)}
-              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-white"
-            >
-              ✕
-            </button>
-
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/60 px-2 py-0.5 rounded border border-red-500/30">
-                {activeItem.category.replace('_', ' ')}
-              </span>
-              <span className="text-xs text-slate-400">Publicado em {formatDateBR(activeItem.publishedDate)}</span>
-            </div>
-
-            <h3 className="text-lg font-bold text-white mb-2">{activeItem.title}</h3>
-            <p className="text-xs text-slate-300 mb-4">{activeItem.description}</p>
-
-            <div className="p-6 rounded-xl border border-slate-800 bg-slate-950 flex flex-col items-center justify-center text-center my-4">
-              {activeItem.mediaType === 'video' ? (
-                <div className="space-y-3">
-                  <div className="w-16 h-16 rounded-full bg-red-600/20 text-red-500 flex items-center justify-center mx-auto border border-red-500/30">
-                    <Video className="h-8 w-8" />
-                  </div>
-                  <div className="text-xs text-slate-300 font-semibold">Videoaula Técnica Disponibilizada</div>
-                  <div className="text-[11px] text-slate-500 max-w-md">
-                    Vídeo gravado no dojo central pelo instrutor {activeItem.authorInstructor}.
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="w-16 h-16 rounded-full bg-blue-600/20 text-blue-500 flex items-center justify-center mx-auto border border-blue-500/30">
-                    <FileText className="h-8 w-8" />
-                  </div>
-                  <div className="text-xs text-slate-300 font-semibold">Apostila Digital em PDF</div>
-                  <div className="text-[11px] text-slate-500 max-w-md">
-                    Documento de estudo com diagramas de pegadas (kumi-kata) e passos de movimentação (tai-sabaki).
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={() => setActiveItem(null)}
-                className="px-4 py-2 rounded-lg bg-slate-800 text-xs font-semibold text-white hover:bg-slate-700"
+            return (
+              <div
+                key={item.id}
+                className="flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden hover:border-slate-700 transition-all group"
               >
-                Fechar Visualizador
-              </button>
-            </div>
+                <div>
+                  {/* Video Thumbnail with Hover Play Button */}
+                  <div
+                    onClick={() => setActivePlayerVideo(item)}
+                    className="relative w-full aspect-video bg-black overflow-hidden cursor-pointer group/thumb"
+                  >
+                    <img
+                      src={
+                        item.thumbnailUrl ||
+                        (item.youtubeVideoId
+                          ? `https://img.youtube.com/vi/${item.youtubeVideoId}/hqdefault.jpg`
+                          : '/src/assets/images/martial_arts_technique_1792068010372.jpg')
+                      }
+                      alt={item.title}
+                      className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-300"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-80 group-hover/thumb:opacity-100 transition-opacity">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-600/90 text-white shadow-lg group-hover/thumb:scale-110 transition-transform">
+                        <Play className="h-5 w-5 fill-white ml-0.5" />
+                      </div>
+                    </div>
+
+                    {/* Status Pill Badge Top Right */}
+                    <div className="absolute top-2.5 right-2.5">
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${statusColor}`}
+                      >
+                        {statusLabel}
+                      </span>
+                    </div>
+
+                    {/* Modality Top Left */}
+                    <div className="absolute top-2.5 left-2.5">
+                      <span className="text-[10px] font-bold text-white bg-slate-900/80 backdrop-blur-sm px-2 py-0.5 rounded border border-slate-700">
+                        {item.martialArtName || 'Arte Marcial'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Body Content */}
+                  <div className="p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <span className="capitalize">{item.category.replace('_', ' ')}</span>
+                      <span>·</span>
+                      <span>{item.authorInstructor || 'Sensei da Academia'}</span>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-white group-hover:text-red-400 transition-colors line-clamp-2">
+                      {item.title}
+                    </h3>
+
+                    {item.description && (
+                      <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                        {item.description}
+                      </p>
+                    )}
+
+                    {/* Belts Access Notice */}
+                    <div className="pt-2">
+                      {item.allBelts ? (
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/90">
+                          <Globe className="h-3.5 w-3.5 shrink-0" />
+                          <span>Liberado para todas as faixas</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-amber-400/90">
+                            <Lock className="h-3.5 w-3.5 shrink-0" />
+                            <span>Apenas faixas selecionadas:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {item.targetBeltNames && item.targetBeltNames.length > 0 ? (
+                              item.targetBeltNames.map((bn, i) => (
+                                <span
+                                  key={i}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 truncate max-w-[140px]"
+                                >
+                                  {bn}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-slate-500">Nenhuma faixa vinculada</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Actions Footer */}
+                <div className="p-4 border-t border-slate-800/80 flex items-center justify-between text-xs bg-slate-950/40">
+                  <button
+                    onClick={() => handleStatusToggle(item)}
+                    className="text-[11px] text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    title="Alternar entre Publicado, Rascunho e Arquivado"
+                  >
+                    Alternar Situação
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleOpenEdit(item)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="Editar dados do vídeo"
+                    >
+                      <Edit2 className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteConfirm(item.id)}
+                      disabled={deletingVideoId === item.id}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                      title="Excluir vídeo"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Empty State */
+        <div className="p-12 text-center rounded-2xl border border-slate-800 bg-slate-900/40 space-y-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800 text-slate-400 mx-auto">
+            <Video className="h-6 w-6" />
           </div>
+          <h3 className="text-sm font-bold text-white">Nenhum vídeo didático encontrado</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            {searchTerm || selectedArtFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all'
+              ? 'Nenhum resultado corresponde aos filtros selecionados. Tente ajustar os termos de busca.'
+              : 'Cadastre a primeira videoaula do YouTube para iniciar o acervo técnico dos seus alunos.'}
+          </p>
+          <button
+            onClick={handleOpenCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-500 transition-colors shadow cursor-pointer mt-2"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Cadastrar Primeiro Vídeo</span>
+          </button>
         </div>
       )}
 
-      {/* Add Item Modal */}
-      {isAddOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200">
-            <h3 className="text-base font-bold text-white mb-3">Publicar Material Educacional</h3>
+      {/* Video Registration / Edit Modal */}
+      <VideoFormModal
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        onSave={handleSaveVideo}
+        tenantId={tenantId}
+        martialArts={modalities}
+        beltRanks={beltRanks}
+        initialVideo={editingVideo}
+      />
 
-            <form onSubmit={handleCreate} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Título do Conteúdo *</label>
-                <input
-                  type="text"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Ex: Ippon-Seoi-Nage: Mecânica de Alavanca"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Categoria Pedagógica</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as any)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
-                  >
-                    <option value="kata">Kata Tradicional</option>
-                    <option value="waza_techniques">Técnicas (Waza)</option>
-                    <option value="rules_referee">Regulamento & Arbitragem</option>
-                    <option value="physical_prep">Preparação Física</option>
-                    <option value="philosophy_history">História & Filosofia</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Formato do Material</label>
-                  <select
-                    value={mediaType}
-                    onChange={(e) => setMediaType(e.target.value as any)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
-                  >
-                    <option value="video">Vídeo / Videoaula</option>
-                    <option value="pdf">Documento PDF / Apostila</option>
-                    <option value="document">Texto Orientativo</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Nível de Acesso</label>
-                <select
-                  value={accessScope}
-                  onChange={(e) => setAccessScope(e.target.value as any)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
-                >
-                  <option value="tenant_all">Liberado para Todos os Alunos</option>
-                  <option value="restricted_belt">Exclusivo para Faixas Específicas</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Descrição & Diretrizes de Estudo</label>
-                <textarea
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Explique o objetivo didático deste conteúdo..."
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddOpen(false)}
-                  className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-red-600 font-semibold text-white hover:bg-red-500"
-                >
-                  Publicar Material
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* On-demand YouTube Player Modal */}
+      <YouTubePlayerModal
+        isOpen={Boolean(activePlayerVideo)}
+        video={activePlayerVideo}
+        onClose={() => setActivePlayerVideo(null)}
+      />
     </div>
   );
 };

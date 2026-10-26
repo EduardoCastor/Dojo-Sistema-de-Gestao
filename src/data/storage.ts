@@ -347,7 +347,10 @@ export class DataStore {
   }
 
   static saveLibraryItems(items: DigitalLibraryItem[]): void {
-    save('library_items', items);
+    const all = load('library_items', INITIAL_LIBRARY_ITEMS);
+    const updatedTenantIds = new Set(items.map(i => i.tenantId));
+    const others = all.filter(i => !updatedTenantIds.has(i.tenantId));
+    save('library_items', [...items, ...others]);
   }
 
   static getBeltExams(tenantId: string): BeltExamEvent[] {

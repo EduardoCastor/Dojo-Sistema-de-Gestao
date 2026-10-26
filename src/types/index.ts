@@ -593,19 +593,45 @@ export interface DigitalLibraryItem {
   id: string;
   tenantId: string;
   title: string;
-  category: 'kata' | 'waza_techniques' | 'physical_prep' | 'rules_referee' | 'philosophy_history';
+  category: 'kata' | 'waza_techniques' | 'physical_prep' | 'rules_referee' | 'philosophy_history' | 'general';
   mediaType: 'video' | 'pdf' | 'document' | 'link';
   mediaUrl: string;
+  youtubeVideoId?: string;
   thumbnailUrl?: string;
   description: string;
   martialArtId?: string;
   martialArtName?: string;
   targetBeltNames?: string[];
+  targetBeltIds?: string[];
+  allBelts?: boolean;
   authorInstructor: string;
   publishedDate: string;
   accessScope: 'public' | 'tenant_all' | 'restricted_belt';
   viewCount: number;
+  displayOrder?: number;
+  status?: 'published' | 'draft' | 'archived';
+  createdByUserId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
+
+export interface SaveVideoPayload {
+  id?: string;
+  tenantId: string;
+  martialArtId: string;
+  title: string;
+  description?: string;
+  youtubeUrl: string;
+  youtubeVideoId: string;
+  thumbnailUrl: string;
+  category: 'kata' | 'waza_techniques' | 'physical_prep' | 'rules_referee' | 'philosophy_history' | 'general';
+  authorInstructor?: string;
+  displayOrder?: number;
+  status: 'published' | 'draft' | 'archived';
+  allBelts: boolean;
+  targetBeltIds: string[];
+}
+
 
 export interface BeltExamEvent {
   id: string;

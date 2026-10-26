@@ -1477,7 +1477,12 @@ export default function App() {
             <DigitalLibraryView
               libraryItems={libraryItems}
               beltRanks={beltRanks}
+              martialArts={martialArts}
+              tenantId={currentTenantId}
               onAddLibraryItem={handleAddLibraryItem}
+              onRefresh={() => {
+                setLibraryItems(DataStore.getLibraryItems(currentTenantId));
+              }}
             />
           )}
 
@@ -1560,6 +1565,7 @@ export default function App() {
                 invoices={invoices}
                 attendances={attendances}
                 libraryItems={libraryItems}
+                enrollments={enrollments}
                 onOpenLibraryItem={() => {}}
               />
             );
