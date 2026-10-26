@@ -73,7 +73,28 @@ USING (
     AND public.is_tenant_member(tenant_id)
     AND (
       -- Se for liberado para todas as faixas e o aluno treina a modalidade
-      all_belts = true
+      (
+        all_belts = true
+        AND EXISTS (
+          SELECT 1 
+          FROM public.students st
+          WHERE st.tenant_id = public.digital_library_videos.tenant_id
+            AND (public.is_own_student(st.id) OR public.is_guardian_of_student(st.id))
+            AND (
+              EXISTS (
+                SELECT 1 FROM public.enrollments en
+                WHERE en.student_id = st.id
+                  AND en.martial_art_id = public.digital_library_videos.martial_art_id
+                  AND en.status = 'active'
+              )
+              OR EXISTS (
+                SELECT 1 FROM public.student_graduations sg
+                WHERE sg.student_id = st.id
+                  AND sg.martial_art_id = public.digital_library_videos.martial_art_id
+              )
+            )
+        )
+      )
       OR EXISTS (
         SELECT 1 
         FROM public.digital_library_video_belts vb
@@ -82,7 +103,7 @@ USING (
         WHERE vb.video_id = public.digital_library_videos.id
           AND vb.tenant_id = public.digital_library_videos.tenant_id
           AND st.tenant_id = public.digital_library_videos.tenant_id
-          AND (st.user_id = auth.uid() OR public.is_own_student(st.id))
+          AND (public.is_own_student(st.id) OR public.is_guardian_of_student(st.id))
       )
     )
   )
