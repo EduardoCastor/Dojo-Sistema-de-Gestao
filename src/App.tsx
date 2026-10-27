@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DataStore } from './data/storage';
 import {
   Tenant,
@@ -38,6 +38,7 @@ import { PricingSection } from './components/public/PricingSection';
 import { FAQSection } from './components/public/FAQSection';
 import { RegisterModal } from './components/public/RegisterModal';
 import { LoginModal } from './components/public/LoginModal';
+import { LegalDocumentsModal } from './components/public/LegalDocumentsModal';
 
 // Admin Views
 import { OverviewDashboard } from './components/admin/OverviewDashboard';
@@ -66,7 +67,15 @@ import { PlatformAdminView } from './components/superadmin/PlatformAdminView';
 import { PlatformAdminAuthView } from './components/superadmin/PlatformAdminAuthView';
 
 // Supabase Real-Time & Auth Services
-import { supabase, authService, isSupabaseConfigured, UserMembership } from './services/supabase';
+import {
+  supabase,
+  authService,
+  isSupabaseConfigured,
+  UserMembership,
+  mapSupabaseRowToTenant,
+} from './services/supabase';
+import { portalAccessService } from './services/portalAccessService';
+import { formDraftStore } from './utils/formDraftStore';
 import { studentService, CreateStudentPayload, UpdateStudentPayload, isValidUUID } from './services/studentService';
 import { classService } from './services/classService';
 import { attendanceService } from './services/attendanceService';
@@ -89,6 +98,12 @@ export default function App() {
   // Modals state
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [legalModalTab, setLegalModalTab] = useState<'terms' | 'privacy'>('terms');
+  const openLegalModal = (tab: 'terms' | 'privacy') => {
+    setLegalModalTab(tab);
+    setIsLegalModalOpen(true);
+  };
   const [isNewStudentOpen, setIsNewStudentOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [isUpgradePlanOpen, setIsUpgradePlanOpen] = useState(false);
@@ -99,6 +114,9 @@ export default function App() {
   const [currentTenantId, setCurrentTenantId] = useState<string>('tenant-kodokan');
   const [currentBranchId, setCurrentBranchId] = useState<string>('branch-matriz');
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  const activeSessionUserIdRef = useRef<string>('');
+  const currentViewRef = useRef(currentView);
+  currentViewRef.current = currentView;
 
   // Data Store States
   const [plans, setPlans] = useState<SaaSPlan[]>(() => DataStore.getPlans());
@@ -354,9 +372,10 @@ export default function App() {
           name: sessionUser.user_metadata?.full_name,
         });
         if (verification.authorized && verification.user) {
+          activeSessionUserIdRef.current = verification.user.id;
           setUsers(DataStore.getUsers());
           setCurrentUserId(verification.user.id);
-          if (detectEnvironmentMode() === 'saas_admin_panel') {
+          if (detectEnvironmentMode() === 'saas_admin_panel' && currentViewRef.current === 'public') {
             setCurrentView('superadmin');
           }
           return;
@@ -365,9 +384,16 @@ export default function App() {
 
       const memberships = await authService.loadUserMemberships(sessionUser.id);
       if (memberships.length > 0) {
-        applyMembershipContext(sessionUser, memberships);
+        const isAlreadyActiveSameUser =
+          activeSessionUserIdRef.current === sessionUser.id && currentViewRef.current !== 'public';
+        applyMembershipContext(sessionUser, memberships, {
+          preserveNavigation: isAlreadyActiveSameUser,
+        });
       }
     };
+
+    // Limpar rascunhos temporários expirados (>12h) ao iniciar
+    formDraftStore.purgeExpiredDrafts();
 
     // Verificar sessão existente ao carregar o aplicativo
     authService.getSession().then(async (session) => {
@@ -376,11 +402,20 @@ export default function App() {
       }
     });
 
-    // Escutar eventos de login/logout em tempo real
+    // Escutar eventos de login/logout em tempo real sem resetar a tela ao alternar abas (visibilitychange)
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
+        // Se a aba apenas recuperou o foco e o mesmo usuário já está autenticado em uma tela interna,
+        // preserva integralmente a navegação, aba administrativa e formulários abertos.
+        if (
+          activeSessionUserIdRef.current === session.user.id &&
+          currentViewRef.current !== 'public'
+        ) {
+          return;
+        }
         await handleSessionUser(session.user);
       } else if (event === 'SIGNED_OUT') {
+        activeSessionUserIdRef.current = '';
         setCurrentUserId('');
         setCurrentView(detectEnvironmentMode() === 'saas_admin_panel' ? 'superadmin' : 'public');
       }
@@ -391,50 +426,54 @@ export default function App() {
     };
   }, []);
 
-  const applyMembershipContext = (user: any, memberships: UserMembership[]) => {
+  // Sincronizar configurações da academia ativa diretamente do Supabase quando aplicável
+  useEffect(() => {
+    let isMounted = true;
+    if (!isSupabaseConfigured() || !isValidUUID(currentTenantId)) return;
+
+    authService.fetchTenantSettings(currentTenantId).then((freshTenant) => {
+      if (!isMounted || !freshTenant) return;
+      setTenants((prev) => {
+        const exists = prev.some((t) => t.id === freshTenant.id);
+        const next = exists
+          ? prev.map((t) => (t.id === freshTenant.id ? { ...t, ...freshTenant } : t))
+          : [freshTenant, ...prev];
+        DataStore.saveTenants(next);
+        return next;
+      });
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentTenantId]);
+
+  const applyMembershipContext = (
+    user: any,
+    memberships: UserMembership[],
+    options?: { preserveNavigation?: boolean }
+  ) => {
     const primary = memberships[0];
     if (!primary) return;
 
+    activeSessionUserIdRef.current = user.id;
+
     const tenantData = primary.tenant;
     if (tenantData) {
+      const loadedTenant = mapSupabaseRowToTenant({
+        ...tenantData,
+        id: primary.tenant_id,
+        admin_name: tenantData.admin_name || user.user_metadata?.full_name || 'Administrador',
+        email: tenantData.email || user.email || '',
+      });
+
       setTenants((prev) => {
-        if (!prev.some((t) => t.id === primary.tenant_id)) {
-          const loadedTenant: Tenant = {
-            id: primary.tenant_id,
-            tradeName: tenantData.trade_name,
-            legalName: tenantData.legal_name || tenantData.trade_name,
-            cnpjOrCpf: tenantData.cnpj_or_cpf,
-            adminName: user.user_metadata?.full_name || 'Administrador',
-            email: user.email || '',
-            phone: '',
-            whatsapp: '',
-            logoUrl: tenantData.logo_url || undefined,
-            address: {
-              street: '',
-              number: '',
-              neighborhood: '',
-              city: 'São Paulo',
-              state: 'SP',
-              zipCode: '',
-            },
-            planId: (tenantData.plan_id as any) || 'trial',
-            status: (tenantData.status as any) || 'trial',
-            trialStartedAt: new Date().toISOString(),
-            trialExpiresAt: tenantData.trial_expires_at || new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            retentionDays: 60,
-            settings: tenantData.settings || {
-              defaultDueDay: 10,
-              penaltyRate: 2,
-              dailyInterestRate: 0.033,
-              familyDiscount2ndMember: 15,
-              multiArtDiscount: 20,
-              customBrandColor: '#dc2626',
-            },
-          };
-          return [loadedTenant, ...prev];
-        }
-        return prev;
+        const exists = prev.some((t) => t.id === primary.tenant_id);
+        const next = exists
+          ? prev.map((t) => (t.id === primary.tenant_id ? { ...t, ...loadedTenant } : t))
+          : [loadedTenant, ...prev];
+        DataStore.saveTenants(next);
+        return next;
       });
     }
 
@@ -459,6 +498,18 @@ export default function App() {
       });
     }
 
+    const sameTenantMemberships = memberships.filter((m) => m.tenant_id === primary.tenant_id);
+    const secondaryRoles = sameTenantMemberships.slice(1).map((m) => ({
+      role: m.role,
+      studentId: m.student_id || undefined,
+      guardianPersonId: m.guardian_person_id || undefined,
+    }));
+
+    const studentMembership = sameTenantMemberships.find((m) => m.role === 'student' || m.student_id);
+    const guardianMembership = sameTenantMemberships.find(
+      (m) => m.role === 'guardian' || m.guardian_person_id
+    );
+
     const authenticatedUser: User = {
       id: user.id,
       tenantId: primary.tenant_id,
@@ -468,6 +519,10 @@ export default function App() {
       role: primary.role,
       phone: user.user_metadata?.phone || '',
       active: true,
+      studentId: primary.student_id || studentMembership?.student_id || undefined,
+      guardianPersonId:
+        primary.guardian_person_id || guardianMembership?.guardian_person_id || undefined,
+      secondaryRoles: secondaryRoles.length > 0 ? secondaryRoles : undefined,
     };
 
     setUsers((prev) => {
@@ -479,8 +534,10 @@ export default function App() {
     if (primary.branch_id) setCurrentBranchId(primary.branch_id);
     setCurrentUserId(user.id);
 
-    // Se o usuário estiver tentando acessar o domínio/rota do Painel Global SaaS com uma conta de academia,
-    // manter currentView === 'superadmin' para que PlatformAdminAuthView exiba o bloqueio 403 sem loop de redirecionamento.
+    if (options?.preserveNavigation) {
+      return;
+    }
+
     if (detectEnvironmentMode() === 'saas_admin_panel') {
       setCurrentView('superadmin');
       return;
@@ -500,8 +557,6 @@ export default function App() {
     if (memberships && memberships.length > 0) {
       applyMembershipContext(user, memberships);
     } else {
-      // Usuário autenticado com sucesso, mas sem academia vinculada
-      // Abre cadastro da primeira academia
       setIsRegisterOpen(true);
     }
   };
@@ -510,6 +565,7 @@ export default function App() {
     if (isSupabaseConfigured()) {
       await authService.signOut();
     }
+    activeSessionUserIdRef.current = '';
     setCurrentUserId('');
     setCurrentView(detectEnvironmentMode() === 'saas_admin_panel' ? 'superadmin' : 'public');
   };
@@ -1282,11 +1338,14 @@ export default function App() {
     setBranches(updated);
   };
 
-  // Handlers for Tenant settings
-  const handleSaveTenant = (updatedTenant: Tenant) => {
-    const updatedTenants = tenants.map(t => (t.id === updatedTenant.id ? updatedTenant : t));
-    DataStore.saveTenants(updatedTenants);
-    setTenants(updatedTenants);
+  // Handlers for Tenant settings (Persists to Supabase and local cache)
+  const handleSaveTenant = async (updatedTenant: Tenant) => {
+    const savedTenant = await authService.saveTenantSettings(updatedTenant);
+    setTenants((prev) => {
+      const updatedTenants = prev.map((t) => (t.id === savedTenant.id ? savedTenant : t));
+      DataStore.saveTenants(updatedTenants);
+      return updatedTenants;
+    });
   };
 
   // Handlers for Plan Upgrade
@@ -1309,6 +1368,16 @@ export default function App() {
     const updated = tenants.map(t => (t.id === tenantId ? { ...t, status } : t));
     DataStore.saveTenants(updated);
     setTenants(updated);
+  };
+
+  const handleOpenTerms = () => {
+    setLegalModalTab('terms');
+    setIsLegalModalOpen(true);
+  };
+
+  const handleOpenPrivacy = () => {
+    setLegalModalTab('privacy');
+    setIsLegalModalOpen(true);
   };
 
   return (
@@ -1339,6 +1408,8 @@ export default function App() {
             <FAQSection />
           </main>
           <PublicFooter
+            onOpenTerms={handleOpenTerms}
+            onOpenPrivacy={handleOpenPrivacy}
             onOpenSaaSPanel={() => {
               try {
                 const basePath = window.location.pathname || '/';
@@ -1601,14 +1672,33 @@ export default function App() {
       {/* VIEW 3: STUDENT PORTAL */}
       {currentView === 'student_portal' && (
         <StudentLayout
-          currentUser={currentUser}
+          currentUser={{ ...currentUser, role: 'student' }}
           tenant={activeTenant}
-          onSwitchPersona={() => setIsLoginOpen(true)}
+          canSwitchPortalRole={(() => {
+            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            return ctx.hasDualPortalRole;
+          })()}
+          onSwitchPersona={() => {
+            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            if (ctx.hasDualPortalRole) {
+              setCurrentView('guardian_portal');
+            } else {
+              setIsLoginOpen(true);
+            }
+          }}
           onLogout={handleLogout}
+          onOpenTerms={() => openLegalModal('terms')}
+          onOpenPrivacy={() => openLegalModal('privacy')}
         >
           {(() => {
-            const currentStudent = students.find(s => s.id === currentUser.studentId) || students[0];
-            const currentPerson = persons.find(p => p.id === currentStudent?.personId) || persons[0];
+            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const currentStudent =
+              ctx.studentRecord ||
+              students.find((s) => s.id === currentUser.studentId && s.tenantId === activeTenant.id) ||
+              null;
+            const currentPerson =
+              ctx.studentPerson ||
+              (currentStudent ? persons.find((p) => p.id === currentStudent.personId) || null : null);
             return (
               <StudentDashboard
                 student={currentStudent}
@@ -1618,7 +1708,13 @@ export default function App() {
                 attendances={attendances}
                 libraryItems={libraryItems}
                 enrollments={enrollments}
+                assessments={physicalAssessments}
                 onOpenLibraryItem={() => {}}
+                onPersonUpdated={(updatedPerson) => {
+                  setPersons((prev) =>
+                    prev.map((p) => (p.id === updatedPerson.id ? updatedPerson : p))
+                  );
+                }}
               />
             );
           })()}
@@ -1628,13 +1724,30 @@ export default function App() {
       {/* VIEW 4: GUARDIAN PORTAL */}
       {currentView === 'guardian_portal' && (
         <StudentLayout
-          currentUser={currentUser}
+          currentUser={{ ...currentUser, role: 'guardian' }}
           tenant={activeTenant}
-          onSwitchPersona={() => setIsLoginOpen(true)}
+          canSwitchPortalRole={(() => {
+            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            return ctx.hasDualPortalRole;
+          })()}
+          onSwitchPersona={() => {
+            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            if (ctx.hasDualPortalRole) {
+              setCurrentView('student_portal');
+            } else {
+              setIsLoginOpen(true);
+            }
+          }}
           onLogout={handleLogout}
+          onOpenTerms={() => openLegalModal('terms')}
+          onOpenPrivacy={() => openLegalModal('privacy')}
         >
           {(() => {
-            const guardianPerson = persons.find(p => p.id === currentUser.guardianPersonId) || persons[2];
+            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const guardianPerson =
+              ctx.guardianPerson ||
+              persons.find((p) => p.id === currentUser.guardianPersonId && p.tenantId === activeTenant.id) ||
+              null;
             return (
               <GuardianPortal
                 guardianPerson={guardianPerson}
@@ -1723,6 +1836,8 @@ export default function App() {
           setIsRegisterOpen(false);
           setIsLoginOpen(true);
         }}
+        onOpenTerms={() => openLegalModal('terms')}
+        onOpenPrivacy={() => openLegalModal('privacy')}
       />
 
       <LoginModal
@@ -1735,6 +1850,14 @@ export default function App() {
           setIsLoginOpen(false);
           setIsRegisterOpen(true);
         }}
+        onOpenTerms={() => openLegalModal('terms')}
+        onOpenPrivacy={() => openLegalModal('privacy')}
+      />
+
+      <LegalDocumentsModal
+        isOpen={isLegalModalOpen}
+        initialTab={legalModalTab}
+        onClose={() => setIsLegalModalOpen(false)}
       />
 
       <StudentFormModal

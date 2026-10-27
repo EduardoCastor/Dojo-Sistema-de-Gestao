@@ -211,27 +211,33 @@ export class DataStore {
     save('tenant_invitations', invitations);
   }
 
-  static getPersons(tenantId: string): Person[] {
+  static getPersons(tenantId?: string): Person[] {
     const all = load('persons', INITIAL_PERSONS);
-    return all.filter(p => p.tenantId === tenantId);
+    return tenantId ? all.filter(p => p.tenantId === tenantId) : all;
   }
 
   static savePersons(persons: Person[]): void {
-    save('persons', persons);
+    const all = load('persons', INITIAL_PERSONS);
+    const updatedTenantIds = new Set(persons.map(p => p.tenantId));
+    const others = all.filter(p => !updatedTenantIds.has(p.tenantId));
+    save('persons', [...persons, ...others]);
   }
 
-  static getGuardianRelationships(tenantId: string): GuardianRelationship[] {
+  static getGuardianRelationships(tenantId?: string): GuardianRelationship[] {
     const all = load('guardians', INITIAL_GUARDIAN_RELATIONSHIPS);
-    return all.filter(g => g.tenantId === tenantId);
+    return tenantId ? all.filter(g => g.tenantId === tenantId) : all;
   }
 
   static saveGuardianRelationships(rels: GuardianRelationship[]): void {
-    save('guardians', rels);
+    const all = load('guardians', INITIAL_GUARDIAN_RELATIONSHIPS);
+    const updatedTenantIds = new Set(rels.map(g => g.tenantId));
+    const others = all.filter(g => !updatedTenantIds.has(g.tenantId));
+    save('guardians', [...rels, ...others]);
   }
 
-  static getStudents(tenantId: string): Student[] {
+  static getStudents(tenantId?: string): Student[] {
     const all = load('students', INITIAL_STUDENTS);
-    return all.filter(s => s.tenantId === tenantId);
+    return tenantId ? all.filter(s => s.tenantId === tenantId) : all;
   }
 
   static saveStudents(students: Student[]): void {
@@ -241,9 +247,9 @@ export class DataStore {
     save('students', [...students, ...others]);
   }
 
-  static getPhysicalAssessments(tenantId: string): PhysicalAssessment[] {
+  static getPhysicalAssessments(tenantId?: string): PhysicalAssessment[] {
     const all = load('physical_assessments', INITIAL_PHYSICAL_ASSESSMENTS);
-    return all.filter(a => a.tenantId === tenantId);
+    return tenantId ? all.filter(a => a.tenantId === tenantId) : all;
   }
 
   static getAllPhysicalAssessments(): PhysicalAssessment[] {
@@ -521,18 +527,18 @@ export class DataStore {
     save('enrollments', enrollments);
   }
 
-  static getAttendances(tenantId: string): AttendanceRecord[] {
+  static getAttendances(tenantId?: string): AttendanceRecord[] {
     const all = load('attendances', INITIAL_ATTENDANCES);
-    return all.filter(a => a.tenantId === tenantId);
+    return tenantId ? all.filter(a => a.tenantId === tenantId) : all;
   }
 
   static saveAttendances(attendances: AttendanceRecord[]): void {
     save('attendances', attendances);
   }
 
-  static getInvoices(tenantId: string): Invoice[] {
+  static getInvoices(tenantId?: string): Invoice[] {
     const all = load('invoices', INITIAL_INVOICES);
-    return all.filter(i => i.tenantId === tenantId);
+    return tenantId ? all.filter(i => i.tenantId === tenantId) : all;
   }
 
   static saveInvoices(invoices: Invoice[]): void {
@@ -542,36 +548,36 @@ export class DataStore {
     save('invoices', [...invoices, ...others]);
   }
 
-  static getMembershipPlans(tenantId: string): MembershipPlan[] {
+  static getMembershipPlans(tenantId?: string): MembershipPlan[] {
     const all = load('membership_plans', INITIAL_MEMBERSHIP_PLANS);
-    return all.filter(p => p.tenantId === tenantId);
+    return tenantId ? all.filter(p => p.tenantId === tenantId) : all;
   }
 
   static saveMembershipPlans(plans: MembershipPlan[]): void {
     save('membership_plans', plans);
   }
 
-  static getFinancialTransactions(tenantId: string): FinancialTransaction[] {
+  static getFinancialTransactions(tenantId?: string): FinancialTransaction[] {
     const all = load('financial_transactions', INITIAL_FINANCIAL_TRANSACTIONS);
-    return all.filter(t => t.tenantId === tenantId);
+    return tenantId ? all.filter(t => t.tenantId === tenantId) : all;
   }
 
   static saveFinancialTransactions(txs: FinancialTransaction[]): void {
     save('financial_transactions', txs);
   }
 
-  static getPaymentReminders(tenantId: string): PaymentReminder[] {
+  static getPaymentReminders(tenantId?: string): PaymentReminder[] {
     const all = load('payment_reminders', INITIAL_PAYMENT_REMINDERS);
-    return all.filter(r => r.tenantId === tenantId);
+    return tenantId ? all.filter(r => r.tenantId === tenantId) : all;
   }
 
   static savePaymentReminders(reminders: PaymentReminder[]): void {
     save('payment_reminders', reminders);
   }
 
-  static getLibraryItems(tenantId: string): DigitalLibraryItem[] {
+  static getLibraryItems(tenantId?: string): DigitalLibraryItem[] {
     const all = load('library_items', INITIAL_LIBRARY_ITEMS);
-    return all.filter(l => l.tenantId === tenantId);
+    return tenantId ? all.filter(l => l.tenantId === tenantId) : all;
   }
 
   static saveLibraryItems(items: DigitalLibraryItem[]): void {

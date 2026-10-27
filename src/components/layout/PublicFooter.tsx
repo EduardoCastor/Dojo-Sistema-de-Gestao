@@ -3,9 +3,15 @@ import { Shield, Lock } from 'lucide-react';
 
 interface PublicFooterProps {
   onOpenSaaSPanel?: () => void;
+  onOpenTerms?: () => void;
+  onOpenPrivacy?: () => void;
 }
 
-export const PublicFooter: React.FC<PublicFooterProps> = ({ onOpenSaaSPanel }) => {
+export const PublicFooter: React.FC<PublicFooterProps> = ({
+  onOpenSaaSPanel,
+  onOpenTerms,
+  onOpenPrivacy,
+}) => {
   return (
     <footer className="border-t border-slate-800 bg-slate-950 text-slate-400 py-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -48,25 +54,53 @@ export const PublicFooter: React.FC<PublicFooterProps> = ({ onOpenSaaSPanel }) =
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Conformidade</h4>
+            <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Conformidade & Privacidade</h4>
             <ul className="space-y-2 text-xs">
-              <li><span className="text-slate-400">Privacidade de Dados de Menores (LGPD)</span></li>
+              <li>
+                <button
+                  type="button"
+                  onClick={onOpenPrivacy}
+                  className="hover:text-white transition-colors text-left cursor-pointer"
+                >
+                  Política de Privacidade (LGPD)
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={onOpenTerms}
+                  className="hover:text-white transition-colors text-left cursor-pointer"
+                >
+                  Termos e Condições de Uso
+                </button>
+              </li>
+              <li><span className="text-slate-400">Privacidade de Dados de Menores (Art. 14 LGPD)</span></li>
               <li><span className="text-slate-400">Armazenamento Restrito de Dados de Saúde</span></li>
-              <li><span className="text-slate-400">Regras de Graduação Configuráveis</span></li>
-              <li><span className="text-slate-400">Retenção e Exportação de Cadastros</span></li>
-              <li><span className="text-slate-400">Auditoria Completa de Operações</span></li>
+              <li><span className="text-slate-400">Retenção e Controle de Acesso Multi-Tenant</span></li>
             </ul>
           </div>
         </div>
 
-        <div className="border-t border-slate-900 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <p>© {new Date().getFullYear()} Tatame Club. Todos os direitos reservados. Feito para o ecossistema de artes marciais brasileiro.</p>
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-            <span>Termos de Uso</span>
+        <div className="border-t border-slate-900 pt-8 flex flex-col lg:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+          <p className="text-center lg:text-left">
+            © {new Date().getFullYear()} Tatame Club. Sistema desenvolvido e mantido por Beaver Soluções em Tecnologia — CNPJ 28.410.730/0001-80. Todos os direitos reservados.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
+            <button
+              type="button"
+              onClick={onOpenTerms}
+              className="hover:text-white transition-colors cursor-pointer underline-offset-4 hover:underline"
+            >
+              Termos de Uso
+            </button>
             <span>·</span>
-            <span>Política de Privacidade</span>
-            <span>·</span>
-            <span>Suporte Técnico</span>
+            <button
+              type="button"
+              onClick={onOpenPrivacy}
+              className="hover:text-white transition-colors cursor-pointer underline-offset-4 hover:underline"
+            >
+              Política de Privacidade
+            </button>
             {onOpenSaaSPanel && (
               <>
                 <span>·</span>

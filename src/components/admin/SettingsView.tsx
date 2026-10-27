@@ -1,11 +1,24 @@
-import React, { useState } from 'react';
-import { Settings, Save, ShieldAlert, Sparkles, Check, Clock, Upload, Image, Trash2, Building2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Save,
+  Sparkles,
+  Check,
+  Upload,
+  Image,
+  Trash2,
+  Building2,
+  AlertCircle,
+  Loader2,
+  MapPin,
+  Globe,
+  ShieldCheck,
+} from 'lucide-react';
 import { Tenant, SaaSPlan } from '../../types';
 
 interface SettingsViewProps {
   tenant: Tenant;
   plans: SaaSPlan[];
-  onSaveTenant: (updatedTenant: Tenant) => void;
+  onSaveTenant: (updatedTenant: Tenant) => Promise<void> | void;
   onUpgradePlan: () => void;
 }
 
@@ -15,55 +28,132 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onSaveTenant,
   onUpgradePlan,
 }) => {
-  const [tradeName, setTradeName] = useState(tenant.tradeName);
-  const [legalName, setLegalName] = useState(tenant.legalName);
-  const [cnpj, setCnpj] = useState(tenant.cnpjOrCpf);
-  const [email, setEmail] = useState(tenant.email);
-  const [phone, setPhone] = useState(tenant.phone);
+  const [tradeName, setTradeName] = useState(tenant.tradeName || '');
+  const [legalName, setLegalName] = useState(tenant.legalName || '');
+  const [cnpj, setCnpj] = useState(tenant.cnpjOrCpf || '');
+  const [adminName, setAdminName] = useState(tenant.adminName || '');
+  const [email, setEmail] = useState(tenant.email || '');
+  const [phone, setPhone] = useState(tenant.phone || '');
+  const [whatsapp, setWhatsapp] = useState(tenant.whatsapp || '');
+  const [website, setWebsite] = useState(tenant.website || '');
   const [logoUrl, setLogoUrl] = useState(tenant.logoUrl || '');
+  const [retentionDays, setRetentionDays] = useState<number>(tenant.retentionDays ?? 1825);
+
+  // Address fields
+  const [street, setStreet] = useState(tenant.address?.street || '');
+  const [number, setNumber] = useState(tenant.address?.number || '');
+  const [neighborhood, setNeighborhood] = useState(tenant.address?.neighborhood || '');
+  const [city, setCity] = useState(tenant.address?.city || '');
+  const [state, setState] = useState(tenant.address?.state || 'SP');
+  const [zipCode, setZipCode] = useState(tenant.address?.zipCode || '');
+
+  // Financial & Commercial settings
   const [dueDay, setDueDay] = useState(tenant.settings?.defaultDueDay ?? 10);
   const [familyDiscount, setFamilyDiscount] = useState(tenant.settings?.familyDiscount2ndMember ?? 15);
   const [multiArtDiscount, setMultiArtDiscount] = useState(tenant.settings?.multiArtDiscount ?? 20);
   const [penaltyRate, setPenaltyRate] = useState(tenant.settings?.penaltyRate ?? 2);
-  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [dailyInterestRate, setDailyInterestRate] = useState(tenant.settings?.dailyInterestRate ?? 0.033);
 
-  const currentPlan = plans.find(p => p.id === tenant.planId) || plans[0];
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Sync local form state when the tenant prop updates from Supabase fetch
+  useEffect(() => {
+    setTradeName(tenant.tradeName || '');
+    setLegalName(tenant.legalName || '');
+    setCnpj(tenant.cnpjOrCpf || '');
+    setAdminName(tenant.adminName || '');
+    setEmail(tenant.email || '');
+    setPhone(tenant.phone || '');
+    setWhatsapp(tenant.whatsapp || '');
+    setWebsite(tenant.website || '');
+    setLogoUrl(tenant.logoUrl || '');
+    setRetentionDays(tenant.retentionDays ?? 1825);
+    setStreet(tenant.address?.street || '');
+    setNumber(tenant.address?.number || '');
+    setNeighborhood(tenant.address?.neighborhood || '');
+    setCity(tenant.address?.city || '');
+    setState(tenant.address?.state || 'SP');
+    setZipCode(tenant.address?.zipCode || '');
+    setDueDay(tenant.settings?.defaultDueDay ?? 10);
+    setFamilyDiscount(tenant.settings?.familyDiscount2ndMember ?? 15);
+    setMultiArtDiscount(tenant.settings?.multiArtDiscount ?? 20);
+    setPenaltyRate(tenant.settings?.penaltyRate ?? 2);
+    setDailyInterestRate(tenant.settings?.dailyInterestRate ?? 0.033);
+  }, [tenant]);
+
+  const currentPlan = plans.find((p) => p.id === tenant.planId) || plans[0];
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      alert('A imagem deve ter no máximo 2MB.');
+      setSaveError('A imagem da logomarca deve ter no máximo 2MB.');
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       setLogoUrl(reader.result as string);
+      setSaveError(null);
     };
     reader.readAsDataURL(file);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaveError(null);
+    setSavedSuccess(false);
+
+    if (!tradeName.trim()) {
+      setSaveError('O Nome Fantasia do Dojo é obrigatório.');
+      return;
+    }
+
     const updated: Tenant = {
       ...tenant,
-      tradeName,
-      legalName,
-      cnpjOrCpf: cnpj,
-      email,
-      phone,
+      tradeName: tradeName.trim(),
+      legalName: legalName.trim() || tradeName.trim(),
+      cnpjOrCpf: cnpj.trim(),
+      adminName: adminName.trim() || tenant.adminName,
+      email: email.trim(),
+      phone: phone.trim(),
+      whatsapp: whatsapp.trim() || phone.trim(),
+      website: website.trim() || undefined,
       logoUrl: logoUrl || undefined,
+      retentionDays: Number(retentionDays) || 1825,
+      address: {
+        street: street.trim(),
+        number: number.trim(),
+        neighborhood: neighborhood.trim(),
+        city: city.trim(),
+        state: state.trim(),
+        zipCode: zipCode.trim(),
+      },
       settings: {
         ...(tenant.settings || {}),
-        defaultDueDay: Number(dueDay),
-        familyDiscount2ndMember: Number(familyDiscount),
-        multiArtDiscount: Number(multiArtDiscount),
-        penaltyRate: Number(penaltyRate),
+        defaultDueDay: Math.min(28, Math.max(1, Number(dueDay) || 10)),
+        familyDiscount2ndMember: Math.min(100, Math.max(0, Number(familyDiscount) || 0)),
+        multiArtDiscount: Math.min(100, Math.max(0, Number(multiArtDiscount) || 0)),
+        penaltyRate: Math.min(20, Math.max(0, Number(penaltyRate) || 0)),
+        dailyInterestRate: Math.max(0, Number(dailyInterestRate) || 0.033),
       },
     };
-    onSaveTenant(updated);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+
+    setIsSaving(true);
+    try {
+      await onSaveTenant(updated);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 4000);
+    } catch (err: any) {
+      console.error('Erro ao salvar configurações do Dojo:', err);
+      setSaveError(
+        err?.message ||
+          'Não foi possível salvar as configurações no banco de dados. Seus dados preenchidos foram mantidos para nova tentativa.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -72,7 +162,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div>
         <h2 className="text-xl font-bold text-white tracking-tight">Configurações & Parâmetros do Dojo</h2>
         <p className="text-xs text-slate-400">
-          Personalize as regras comerciais de desconto, dia padrão de vencimento e dados institucionais.
+          Personalize os dados institucionais, endereço oficial, regras comerciais de desconto, vencimento e retenção LGPD.
         </p>
       </div>
 
@@ -91,6 +181,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <button
+          type="button"
           onClick={onUpgradePlan}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold text-xs shadow transition-colors cursor-pointer"
         >
@@ -99,15 +190,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </button>
       </div>
 
+      {saveError && (
+        <div className="p-3.5 rounded-lg bg-red-950/70 border border-red-500/50 text-red-200 text-xs flex items-start gap-2.5">
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div>
+            <p className="font-semibold text-red-300">Falha ao gravar configurações:</p>
+            <p>{saveError}</p>
+          </div>
+        </div>
+      )}
+
       {savedSuccess && (
-        <div className="p-3 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
+        <div className="p-3.5 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
           <Check className="h-4 w-4 shrink-0 text-emerald-400" />
-          <span>Configurações atualizadas com sucesso!</span>
+          <span>Configurações do Dojo gravadas e confirmadas com sucesso!</span>
         </div>
       )}
 
       <form onSubmit={handleSave} className="space-y-6 text-xs">
-        {/* Dados Institucionais */}
+        {/* 1. Dados Institucionais */}
         <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-4">
           <h3 className="text-xs font-bold text-white uppercase tracking-wider">
             1. Dados Cadastrais & Impressão de Recibos
@@ -118,6 +219,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <label className="block text-slate-300 font-medium mb-1">Nome Fantasia *</label>
               <input
                 type="text"
+                required
                 value={tradeName}
                 onChange={(e) => setTradeName(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
@@ -132,6 +234,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onChange={(e) => setLegalName(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Responsável / Sensei Titular</label>
+              <input
+                type="text"
+                value={adminName}
+                onChange={(e) => setAdminName(e.target.value)}
+                placeholder="Nome do responsável pela academia"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Website ou Instagram Oficial</label>
+              <div className="relative">
+                <Globe className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-500" />
+                <input
+                  type="text"
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  placeholder="https://instagram.com/seudojo"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-8 pr-3 py-2 text-white focus:border-red-500 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
 
@@ -189,7 +318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-slate-300 font-medium mb-1">CNPJ ou CPF</label>
               <input
@@ -219,16 +348,97 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
               />
             </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">WhatsApp Oficial</label>
+              <input
+                type="text"
+                value={whatsapp}
+                onChange={(e) => setWhatsapp(e.target.value)}
+                placeholder="(11) 99999-9999"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Políticas de Mensalidades & Descontos */}
+        {/* 2. Endereço da Sede */}
         <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-4">
-          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-            2. Regras Comerciais & Descontos Familiares
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+            <MapPin className="h-4 w-4 text-red-400" />
+            <span>2. Endereço Oficial da Academia</span>
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-slate-300 font-medium mb-1">Logradouro (Rua / Av.)</label>
+              <input
+                type="text"
+                value={street}
+                onChange={(e) => setStreet(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Número</label>
+              <input
+                type="text"
+                value={number}
+                onChange={(e) => setNumber(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">CEP</label>
+              <input
+                type="text"
+                value={zipCode}
+                onChange={(e) => setZipCode(e.target.value)}
+                placeholder="00000-000"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Bairro</label>
+              <input
+                type="text"
+                value={neighborhood}
+                onChange={(e) => setNeighborhood(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Cidade</label>
+              <input
+                type="text"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">UF</label>
+              <input
+                type="text"
+                maxLength={2}
+                value={state}
+                onChange={(e) => setState(e.target.value.toUpperCase())}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Políticas de Mensalidades, Descontos e LGPD */}
+        <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-4">
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+            3. Regras Comerciais, Descontos Familiares & Retenção LGPD
+          </h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
               <label className="block text-slate-300 font-medium mb-1">Dia Padrão de Vencimento</label>
               <input
@@ -243,7 +453,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-slate-300 font-medium mb-1">Desconto Familiar (2º Membro)</label>
+              <label className="block text-slate-300 font-medium mb-1">Desconto Familiar (2º)</label>
               <div className="relative">
                 <input
                   type="number"
@@ -290,16 +500,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <span className="text-[10px] text-slate-500 mt-1 block">Conforme limites legais CDC</span>
             </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Juros ao Dia (%)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.001"
+                  value={dailyInterestRate}
+                  onChange={(e) => setDailyInterestRate(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+                />
+                <span className="absolute right-3 top-2 text-slate-400">%</span>
+              </div>
+              <span className="text-[10px] text-slate-500 mt-1 block">Padrão: 0.033% / dia</span>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-slate-300">
+              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+              <div>
+                <span className="font-semibold">Prazo de Retenção de Cadastros Inativos (LGPD):</span>
+                <p className="text-[10px] text-slate-400">
+                  Período padrão de guarda para histórico contratual e obrigações legais (em dias).
+                </p>
+              </div>
+            </div>
+            <div className="w-full sm:w-40">
+              <input
+                type="number"
+                min="365"
+                max="3650"
+                value={retentionDays}
+                onChange={(e) => setRetentionDays(Number(e.target.value))}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-white focus:border-red-500 focus:outline-none"
+              />
+            </div>
           </div>
         </div>
 
         <div className="flex justify-end">
           <button
             type="submit"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold text-xs shadow transition-colors cursor-pointer"
+            disabled={isSaving}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white font-semibold text-xs shadow transition-colors cursor-pointer"
           >
-            <Save className="h-4 w-4" />
-            <span>Salvar Configurações</span>
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Gravando no banco de dados...</span>
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                <span>Salvar Configurações</span>
+              </>
+            )}
           </button>
         </div>
       </form>

@@ -1,7 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { X, Building2, User, Mail, Phone, MapPin, CheckCircle, Clock, AlertCircle, Upload, Image, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  X,
+  Building2,
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  Upload,
+  Image,
+  Trash2,
+  Save,
+  RotateCcw,
+} from 'lucide-react';
 import { Tenant, Branch, User as UserType } from '../../types';
 import { supabase, authService, isSupabaseConfigured, UserMembership } from '../../services/supabase';
+import { formDraftStore } from '../../utils/formDraftStore';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -9,6 +25,8 @@ interface RegisterModalProps {
   onSuccess: (newTenant: Tenant, newBranch: Branch, newUser: UserType) => void;
   onRegisterAtomicSuccess?: (rpcResult: any, memberships: UserMembership[]) => void;
   onOpenLogin?: () => void;
+  onOpenTerms?: () => void;
+  onOpenPrivacy?: () => void;
 }
 
 interface SupabaseErrorDetail {
@@ -18,12 +36,34 @@ interface SupabaseErrorDetail {
   hint?: string | null;
 }
 
+interface RegisterAcademyDraft {
+  tradeName: string;
+  legalName: string;
+  cnpjOrCpf: string;
+  adminName: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  logoUrl: string;
+  street: string;
+  number: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  acceptedLegal: boolean;
+}
+
+const DRAFT_FORM_KEY = 'register_academy_modal';
+
 export const RegisterModal: React.FC<RegisterModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
   onRegisterAtomicSuccess,
   onOpenLogin,
+  onOpenTerms,
+  onOpenPrivacy,
 }) => {
   const [tradeName, setTradeName] = useState('');
   const [legalName, setLegalName] = useState('');
@@ -39,13 +79,17 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   const [city, setCity] = useState('São Paulo');
   const [state, setState] = useState('SP');
   const [zipCode, setZipCode] = useState('');
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailedError, setDetailedError] = useState<SupabaseErrorDetail | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [currentSessionUser, setCurrentSessionUser] = useState<any>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
 
+  const wasOpenRef = useRef(false);
   const supabaseActive = isSupabaseConfigured();
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,28 +107,146 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Ao abrir o modal, sincroniza dados da sessão ativa no Supabase Auth
+  // Inicializa apenas na transição fechado -> aberto para nunca perder estado ao alternar abas
   useEffect(() => {
-    if (isOpen && supabaseActive && supabase) {
+    if (isOpen && !wasOpenRef.current) {
+      wasOpenRef.current = true;
       setError(null);
       setDetailedError(null);
       setSuccessMessage(null);
 
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setCurrentSessionUser(session.user);
-          if (!email && session.user.email) {
-            setEmail(session.user.email);
-          }
-          if (!adminName && session.user.user_metadata?.full_name) {
-            setAdminName(session.user.user_metadata.full_name);
-          }
-        } else {
-          setCurrentSessionUser(null);
+      const restoreDraftForUser = (userId: string) => {
+        const loaded = formDraftStore.loadDraft<RegisterAcademyDraft>({
+          tenantId: 'public',
+          userId,
+          formKey: DRAFT_FORM_KEY,
+        });
+        if (loaded && loaded.data) {
+          const d = loaded.data;
+          setTradeName(d.tradeName || '');
+          setLegalName(d.legalName || '');
+          setCnpjOrCpf(d.cnpjOrCpf || '');
+          setAdminName(d.adminName || '');
+          setEmail(d.email || '');
+          setPhone(d.phone || '');
+          setWhatsapp(d.whatsapp || '');
+          setLogoUrl(d.logoUrl || '');
+          setStreet(d.street || '');
+          setNumber(d.number || '');
+          setNeighborhood(d.neighborhood || '');
+          setCity(d.city || 'São Paulo');
+          setState(d.state || 'SP');
+          setZipCode(d.zipCode || '');
+          setAcceptedLegal(Boolean(d.acceptedLegal));
+          setDraftSavedAt(loaded.savedAt);
+          setRestoredFromDraft(true);
+          return true;
         }
-      });
+        return false;
+      };
+
+      if (supabaseActive && supabase) {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session?.user) {
+            setCurrentSessionUser(session.user);
+            const restored = restoreDraftForUser(session.user.id);
+            if (!restored) {
+              if (session.user.email) setEmail((prev) => prev || session.user.email || '');
+              if (session.user.user_metadata?.full_name) {
+                setAdminName((prev) => prev || session.user.user_metadata.full_name || '');
+              }
+            }
+          } else {
+            setCurrentSessionUser(null);
+            restoreDraftForUser('anonymous');
+          }
+        });
+      } else {
+        restoreDraftForUser('anonymous');
+      }
+    } else if (!isOpen && wasOpenRef.current) {
+      wasOpenRef.current = false;
     }
   }, [isOpen, supabaseActive]);
+
+  // Auto-save do rascunho temporário
+  useEffect(() => {
+    if (!isOpen) return;
+    const hasContent =
+      tradeName.trim() ||
+      legalName.trim() ||
+      cnpjOrCpf.trim() ||
+      adminName.trim() ||
+      phone.trim() ||
+      street.trim();
+    if (!hasContent) return;
+
+    const timer = setTimeout(() => {
+      const userId = currentSessionUser?.id || 'anonymous';
+      const result = formDraftStore.saveDraft<RegisterAcademyDraft>(
+        { tenantId: 'public', userId, formKey: DRAFT_FORM_KEY },
+        {
+          tradeName,
+          legalName,
+          cnpjOrCpf,
+          adminName,
+          email,
+          phone,
+          whatsapp,
+          logoUrl: logoUrl.length < 150000 ? logoUrl : '',
+          street,
+          number,
+          neighborhood,
+          city,
+          state,
+          zipCode,
+          acceptedLegal,
+        }
+      );
+      if (result.saved) {
+        setDraftSavedAt(result.savedAt);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [
+    isOpen,
+    currentSessionUser,
+    tradeName,
+    legalName,
+    cnpjOrCpf,
+    adminName,
+    email,
+    phone,
+    whatsapp,
+    logoUrl,
+    street,
+    number,
+    neighborhood,
+    city,
+    state,
+    zipCode,
+    acceptedLegal,
+  ]);
+
+  const handleClearDraftAndCancel = () => {
+    const userId = currentSessionUser?.id || 'anonymous';
+    formDraftStore.clearDraft({ tenantId: 'public', userId, formKey: DRAFT_FORM_KEY });
+    setTradeName('');
+    setLegalName('');
+    setCnpjOrCpf('');
+    setAdminName('');
+    setPhone('');
+    setWhatsapp('');
+    setLogoUrl('');
+    setStreet('');
+    setNumber('');
+    setNeighborhood('');
+    setAcceptedLegal(false);
+    setRestoredFromDraft(false);
+    setDraftSavedAt(null);
+    onClose();
+  };
 
   if (!isOpen) return null;
 
@@ -94,7 +256,6 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     setDetailedError(null);
     setSuccessMessage(null);
 
-    // 1. Validações estritas dos campos obrigatórios
     if (!tradeName.trim()) {
       setError('O Nome Fantasia da academia é obrigatório.');
       return;
@@ -107,13 +268,17 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       setError('O Nome do Responsável / Sensei é obrigatório.');
       return;
     }
+    if (!acceptedLegal) {
+      setError('Você precisa ler e concordar com os Termos de Uso e a Política de Privacidade (LGPD) para criar a conta da academia.');
+      return;
+    }
 
-    // 2. Se o Supabase estiver configurado, executa a persistência real via RPC
+    const userIdForDraft = currentSessionUser?.id || 'anonymous';
+
     if (supabaseActive && supabase) {
       setLoading(true);
 
       try {
-        // Valida se há usuário autenticado na sessão atual do Supabase Auth
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) {
           throw sessionError;
@@ -133,7 +298,6 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           return;
         }
 
-        // Monta o payload do endereço como objeto JSON compatível com jsonb
         const addressJson = {
           street: street.trim() || 'Rua Principal',
           number: number.trim() || 'S/N',
@@ -143,8 +307,6 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           zipCode: zipCode.trim() || '01000-000',
         };
 
-        // 3. Execução da função RPC atômica exatamente com os sete parâmetros especificados
-        // Não envia user_id ou role: a função identifica o usuário pelo auth.uid()
         const { data, error: rpcError } = await supabase.rpc('register_academy_atomic', {
           p_trade_name: tradeName.trim(),
           p_legal_name: legalName.trim() || tradeName.trim(),
@@ -155,7 +317,6 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           p_address: addressJson,
         });
 
-        // 4. Tratamento de erro detalhado do Supabase
         if (rpcError) {
           console.error('Erro ao cadastrar academia:', rpcError);
           setDetailedError({
@@ -166,11 +327,9 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           });
           setError(rpcError.message || 'Não foi possível cadastrar a academia. Tente novamente.');
           setLoading(false);
-          // IMPORTANTE: Não cria dados fictícios em caso de erro no servidor
           return;
         }
 
-        // 5. Validação da confirmação de sucesso
         if (!data || data.success !== true) {
           console.error('Retorno inesperado:', data);
           setDetailedError({
@@ -182,7 +341,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           return;
         }
 
-        // 6. Atualização dos vínculos do usuário a partir da tabela tenant_memberships
+        // Registra o aceite contratual dos Termos de Uso e Política de Privacidade
+        await authService.recordLegalAcceptance({
+          userId: session.user.id,
+          tenantId: data.tenant_id,
+          context: 'academy_registration',
+        });
+
         const memberships = await authService.loadUserMemberships(session.user.id);
 
         if (logoUrl && data?.tenant_id) {
@@ -196,10 +361,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           }
         }
 
+        // Limpa o rascunho após sucesso confirmado
+        formDraftStore.clearDraft({ tenantId: 'public', userId: session.user.id, formKey: DRAFT_FORM_KEY });
+        formDraftStore.clearDraft({ tenantId: 'public', userId: 'anonymous', formKey: DRAFT_FORM_KEY });
+
         setSuccessMessage('Academia e filial matriz cadastradas com sucesso!');
         setLoading(false);
 
-        // 7. Notifica o componente pai para carregar o painel administrativo com os dados reais
         setTimeout(() => {
           if (onRegisterAtomicSuccess) {
             onRegisterAtomicSuccess(data, memberships);
@@ -221,7 +389,6 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       return;
     }
 
-    // Provisionamento isolado da nova academia sem qualquer vínculo com dados de demonstração
     const { tenant: newTenant, branch: newBranch, ownerUser: newUser } =
       await import('../../services/saasPlatformService').then((m) =>
         m.saasPlatformService.registerAcademyIsolated({
@@ -244,12 +411,19 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         })
       );
 
+    await authService.recordLegalAcceptance({
+      userId: newUser.id,
+      tenantId: newTenant.id,
+      context: 'academy_registration',
+    });
+
+    formDraftStore.clearDraft({ tenantId: 'public', userId: userIdForDraft, formKey: DRAFT_FORM_KEY });
     onSuccess(newTenant, newBranch, newUser);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200">
+      <div className="relative w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-200 my-auto">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
@@ -257,14 +431,23 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           <X className="h-5 w-5" />
         </button>
 
-        <div className="flex items-center gap-2 mb-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600/20 text-red-500">
-            <Building2 className="h-5 w-5" />
+        <div className="flex items-center justify-between gap-2 mb-2 pr-8">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600/20 text-red-500">
+              <Building2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Cadastre sua Academia</h3>
+              <p className="text-xs text-slate-400">Ativação imediata do Plano Teste Gratuito de 10 dias.</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-bold text-white">Cadastre sua Academia</h3>
-            <p className="text-xs text-slate-400">Ativação imediata do Plano Teste Gratuito de 10 dias.</p>
-          </div>
+
+          {draftSavedAt && (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2 py-1 rounded">
+              <Save className="h-3 w-3" />
+              <span>{restoredFromDraft ? 'Rascunho restaurado' : 'Rascunho salvo'}</span>
+            </div>
+          )}
         </div>
 
         {/* Indicador de autenticação de dados */}
@@ -317,7 +500,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           </div>
         )}
 
-        {/* Erro detalhado do Supabase sem ocultar code, message, details e hint */}
+        {/* Erro detalhado do Supabase */}
         {detailedError && (
           <div className="mb-4 p-3 rounded-lg bg-red-950/70 border border-red-500/70 text-xs text-red-200 space-y-1.5">
             <div className="flex items-center gap-2 font-bold text-red-300">
@@ -527,7 +710,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           {/* Endereço compatível com objeto jsonb */}
           <div className="pt-1">
             <label className="block text-slate-400 font-medium mb-1.5 text-[11px]">
-              Endereço da Unidade Matriz (armazenado em p_address jsonb)
+              Endereço da Unidade Matriz
             </label>
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="col-span-2">
@@ -594,14 +777,45 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             </div>
           </div>
 
-          <div className="pt-2">
+          {/* Aceite contratual dos Termos de Uso e Política de Privacidade */}
+          <div className="p-3 rounded-xl border border-slate-700/80 bg-slate-950/60 space-y-2">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptedLegal}
+                onChange={(e) => setAcceptedLegal(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 text-red-600 focus:ring-red-500"
+              />
+              <span className="text-[11px] text-slate-300 leading-relaxed">
+                Declaro que li e concordo com os{' '}
+                <button
+                  type="button"
+                  onClick={onOpenTerms}
+                  className="text-red-400 hover:text-red-300 font-semibold underline underline-offset-2"
+                >
+                  Termos de Uso
+                </button>{' '}
+                e com a{' '}
+                <button
+                  type="button"
+                  onClick={onOpenPrivacy}
+                  className="text-red-400 hover:text-red-300 font-semibold underline underline-offset-2"
+                >
+                  Política de Privacidade (LGPD)
+                </button>{' '}
+                do Tatame Club (Beaver Soluções em Tecnologia — CNPJ 28.410.730/0001-80).
+              </span>
+            </label>
+          </div>
+
+          <div className="pt-2 space-y-2">
             <button
               type="submit"
               disabled={loading}
               className="w-full flex items-center justify-center gap-2 rounded-lg bg-red-600 py-3 text-sm font-semibold text-white hover:bg-red-500 active:bg-red-700 transition-colors shadow-lg shadow-red-900/30 cursor-pointer disabled:opacity-50"
             >
               {loading ? (
-                <span>Executando register_academy_atomic...</span>
+                <span>Registrando academia...</span>
               ) : (
                 <>
                   <CheckCircle className="h-4 w-4" />
@@ -609,9 +823,20 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                 </>
               )}
             </button>
-            <p className="text-[11px] text-center text-slate-500 mt-2">
-              Ao cadastrar, a academia, filial matriz e perfil de proprietário serão criados atomicamente.
-            </p>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+              <span>Criação atômica da academia, filial matriz e perfil gestor.</span>
+              {draftSavedAt && (
+                <button
+                  type="button"
+                  onClick={handleClearDraftAndCancel}
+                  className="inline-flex items-center gap-1 text-slate-400 hover:text-red-400 transition-colors"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Descartar rascunho</span>
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>

@@ -20,6 +20,7 @@ import {
 import { Person, Student, GuardianRelationship } from '../../types';
 import { formatCPF, formatPhoneBR, formatDateBR } from '../../utils/cpfValidator';
 import { studentService } from '../../services/studentService';
+import { PortalAccountControlSection } from './PortalAccountControlSection';
 
 interface GuardianDetailModalProps {
   isOpen: boolean;
@@ -221,6 +222,16 @@ export const GuardianDetailModal: React.FC<GuardianDetailModalProps> = ({
               </span>
             </div>
           </div>
+        </div>
+
+        {/* Gestão de Conta e Acesso ao Portal do Responsável */}
+        <div className="mt-4">
+          <PortalAccountControlSection
+            tenantId={tenantId}
+            targetType="guardian"
+            person={guardian}
+            onUpdated={onRelationshipChanged}
+          />
         </div>
 
         {/* SEÇÃO PRINCIPAL: ALUNOS SOB SUA RESPONSABILIDADE */}

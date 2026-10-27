@@ -64,6 +64,7 @@ import { BmiEvolutionChart } from './BmiEvolutionChart';
 import { AssessmentFormModal } from './AssessmentFormModal';
 import { MedicalDocumentsSection } from './MedicalDocumentsSection';
 import { GraduationHistorySection } from './GraduationHistorySection';
+import { PortalAccountControlSection } from './PortalAccountControlSection';
 
 interface StudentsViewProps {
   students: Student[];
@@ -891,6 +892,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       </span>
                     </div>
                   </div>
+
+                  {/* Gestão de Conta e Acesso ao Portal do Aluno */}
+                  <div className="sm:col-span-2">
+                    <PortalAccountControlSection
+                      tenantId={selectedStudent.tenantId || tenantId || 'tenant-1'}
+                      targetType="student"
+                      student={selectedStudent}
+                      person={activePerson}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -966,6 +977,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         {g.relationship.notes && (
                           <div className="text-[11px] text-slate-400 bg-slate-900 p-2 rounded border border-slate-800">
                             Observações: {g.relationship.notes}
+                          </div>
+                        )}
+
+                        {g.person && (
+                          <div className="pt-2">
+                            <PortalAccountControlSection
+                              tenantId={selectedStudent.tenantId || tenantId || 'tenant-1'}
+                              targetType="guardian"
+                              person={g.person}
+                            />
                           </div>
                         )}
                       </div>

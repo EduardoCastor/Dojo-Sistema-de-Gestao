@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   UserCheck,
@@ -11,10 +11,12 @@ import {
   Loader2,
   Check,
   User,
+  Save,
 } from 'lucide-react';
 import { Person } from '../../types';
 import { studentService } from '../../services/studentService';
 import { cleanCPF, formatCPF, validateCPF, formatPhoneBR } from '../../utils/cpfValidator';
+import { formDraftStore } from '../../utils/formDraftStore';
 
 interface GuardianFormModalProps {
   isOpen: boolean;
@@ -32,6 +34,8 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
   onSuccess,
 }) => {
   const isEditing = Boolean(guardianToEdit);
+  const draftFormKey = guardianToEdit?.id ? `guardian_form:${guardianToEdit.id}` : 'guardian_form:new';
+  const initializedKeyRef = useRef<string | null>(null);
 
   // Campos do Formulário
   const [fullName, setFullName] = useState('');
@@ -62,13 +66,49 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedKeyRef.current = null;
+      return;
+    }
+
+    const sessionKey = `${tenantId}:${guardianToEdit?.id || 'new'}`;
+    if (initializedKeyRef.current === sessionKey) {
+      return;
+    }
+    initializedKeyRef.current = sessionKey;
 
     setError('');
     setSuccessMsg('');
     setIsSubmitting(false);
+
+    const savedDraft = formDraftStore.loadDraft<Record<string, any>>({
+      tenantId,
+      userId: 'admin',
+      formKey: draftFormKey,
+    });
+
+    if (savedDraft && savedDraft.data) {
+      const d = savedDraft.data;
+      setFullName(d.fullName || '');
+      setSocialName(d.socialName || '');
+      setCpf(d.cpf || '');
+      setBirthDate(d.birthDate || '1985-05-20');
+      setGender(d.gender || 'other');
+      setPhone(d.phone || '');
+      setEmail(d.email || '');
+      setZipCode(d.zipCode || '');
+      setStreet(d.street || '');
+      setNumber(d.number || '');
+      setComplement(d.complement || '');
+      setNeighborhood(d.neighborhood || '');
+      setCity(d.city || 'São Paulo');
+      setState(d.state || 'SP');
+      setDraftSavedAt(savedDraft.savedAt);
+      return;
+    }
 
     if (guardianToEdit) {
       setFullName(guardianToEdit.fullName || '');
@@ -106,7 +146,59 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
       setState('SP');
       setCpfStatus(null);
     }
-  }, [isOpen, guardianToEdit]);
+  }, [isOpen, guardianToEdit, tenantId, draftFormKey]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!fullName && !cpf && !phone && !email) return;
+
+    const timer = setTimeout(() => {
+      const res = formDraftStore.saveDraft({
+        tenantId,
+        userId: 'admin',
+        formKey: draftFormKey,
+        data: {
+          fullName,
+          socialName,
+          cpf,
+          birthDate,
+          gender,
+          phone,
+          email,
+          zipCode,
+          street,
+          number,
+          complement,
+          neighborhood,
+          city,
+          state,
+        },
+      });
+      if (res.saved) {
+        setDraftSavedAt(res.savedAt);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [
+    isOpen,
+    tenantId,
+    draftFormKey,
+    fullName,
+    socialName,
+    cpf,
+    birthDate,
+    gender,
+    phone,
+    email,
+    zipCode,
+    street,
+    number,
+    complement,
+    neighborhood,
+    city,
+    state,
+  ]);
 
   if (!isOpen) return null;
 
@@ -225,6 +317,8 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
         });
       }
 
+      formDraftStore.clearDraft({ tenantId, userId: 'admin', formKey: draftFormKey });
+
       setSuccessMsg(
         isEditing
           ? 'Dados do responsável atualizados com sucesso!'
@@ -254,20 +348,29 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
         </button>
 
         {/* Modal Header */}
-        <div className="flex items-center gap-3 pb-4 border-b border-slate-800">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-600/20 text-red-400 border border-red-500/30">
-            <UserCheck className="h-5 w-5" />
+        <div className="flex items-center justify-between gap-3 pb-4 border-b border-slate-800 pr-8">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-600/20 text-red-400 border border-red-500/30">
+              <UserCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">
+                {isEditing ? 'Editar Dados do Responsável' : 'Cadastrar Novo Responsável'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isEditing
+                  ? 'Atualize os dados cadastrais e de contato desta pessoa na academia.'
+                  : 'Cadastre a pessoa física do responsável para posterior vínculo com alunos.'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-bold text-white">
-              {isEditing ? 'Editar Dados do Responsável' : 'Cadastrar Novo Responsável'}
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {isEditing
-                ? 'Atualize os dados cadastrais e de contato desta pessoa na academia.'
-                : 'Cadastre a pessoa física do responsável para posterior vínculo com alunos.'}
-            </p>
-          </div>
+
+          {draftSavedAt && (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-lg shrink-0">
+              <Save className="h-3 w-3" />
+              <span>Rascunho salvo</span>
+            </div>
+          )}
         </div>
 
         {/* Feedback Messages */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   UserPlus,
@@ -18,6 +18,8 @@ import {
   Trash2,
   Plus,
   CreditCard,
+  Save,
+  RotateCcw,
 } from 'lucide-react';
 import {
   Student,
@@ -49,6 +51,7 @@ import {
   parseCompetenceToInt,
 } from '../../services/financialService';
 import { supabase, isSupabaseConfigured } from '../../services/supabase';
+import { formDraftStore } from '../../utils/formDraftStore';
 
 interface StudentFormModalProps {
   isOpen: boolean;
@@ -194,6 +197,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
+  const initializedSessionKeyRef = useRef<string | null>(null);
+  const draftFormKey = `student_form_${studentToEdit?.id || 'new'}`;
 
   // Vínculos existentes deste aluno (quando em modo de edição)
   const [studentExistingLinks, setStudentExistingLinks] = useState<{
@@ -226,136 +233,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     }
 
     loadGuardians();
-
-    // Se estiver editando um aluno, carregar todos os relacionamentos de responsáveis dele
-    if (studentToEdit) {
-      // 1. Sincronização imediata baseada nas props allGuardians e allPersons
-      const localRels = (allGuardians || []).filter((g) => g.studentId === studentToEdit.id);
-      if (localRels.length > 0) {
-        const localLinks = localRels.map((r) => {
-          const person = (allPersons || []).find((p) => p.id === r.guardianPersonId) || guardianPersonToEdit;
-          return {
-            id: r.id,
-            guardianPerson: person || {
-              id: r.guardianPersonId,
-              tenantId,
-              fullName: 'Responsável',
-              cpf: '',
-              birthDate: '1985-01-01',
-              gender: 'other' as const,
-              phone: '',
-              email: '',
-              address: { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
-              createdAt: new Date().toISOString(),
-            },
-            relationship: r,
-          };
-        });
-        setStudentExistingLinks(localLinks);
-        setHasGuardian(true);
-
-        const primary = localLinks[0];
-        if (primary && primary.guardianPerson) {
-          setGuardianName(primary.guardianPerson.fullName || '');
-          setGuardianCpf(primary.guardianPerson.cpf ? formatCPF(primary.guardianPerson.cpf) : '');
-          setGuardianPhone(primary.guardianPerson.phone || '');
-          setGuardianEmail(primary.guardianPerson.email || '');
-          setRelationshipType(primary.relationship.relationshipLabel || 'Pai');
-        }
-      } else if (guardianPersonToEdit && guardianRelToEdit) {
-        setStudentExistingLinks([
-          {
-            id: guardianRelToEdit.id,
-            guardianPerson: guardianPersonToEdit,
-            relationship: guardianRelToEdit,
-          },
-        ]);
-        setHasGuardian(true);
-        setGuardianName(guardianPersonToEdit.fullName || '');
-        setGuardianCpf(guardianPersonToEdit.cpf ? formatCPF(guardianPersonToEdit.cpf) : '');
-        setGuardianPhone(guardianPersonToEdit.phone || '');
-        setGuardianEmail(guardianPersonToEdit.email || '');
-        setRelationshipType(guardianRelToEdit.relationshipLabel || 'Pai');
-      }
-
-      // 2. Consulta segura ao Supabase (sem embeddings de chave estrangeira composta)
-      if (isValidUUID(studentToEdit.id) && isSupabaseConfigured() && supabase) {
-        (async () => {
-          try {
-            const { data: rels, error: rErr } = await supabase
-              .from('guardian_relationships')
-              .select('*')
-              .eq('student_id', studentToEdit.id)
-              .eq('tenant_id', studentToEdit.tenantId || tenantId);
-
-            if (rels && rels.length > 0 && isMounted) {
-              const guardianPersonIds = rels.map((r: any) => r.guardian_person_id);
-              const { data: personsData } = await supabase
-                .from('persons')
-                .select('*')
-                .in('id', guardianPersonIds)
-                .eq('tenant_id', studentToEdit.tenantId || tenantId);
-
-              const personsMap = new Map<string, any>((personsData || []).map((p: any) => [p.id, p]));
-
-              const loaded = rels.map((r: any) => {
-                const p = personsMap.get(r.guardian_person_id);
-                return {
-                  id: r.id,
-                  guardianPerson: {
-                    id: p?.id || r.guardian_person_id,
-                    tenantId: p?.tenant_id || tenantId,
-                    fullName: p?.full_name || 'Responsável',
-                    socialName: p?.social_name || undefined,
-                    cpf: p?.cpf || '',
-                    birthDate: p?.birth_date || '1985-01-01',
-                    gender: (p?.gender as any) || 'other',
-                    phone: p?.phone || '',
-                    email: p?.email || '',
-                    address: p?.address || {},
-                    createdAt: p?.created_at || new Date().toISOString(),
-                  },
-                  relationship: {
-                    id: r.id,
-                    tenantId: r.tenant_id,
-                    studentId: r.student_id,
-                    guardianPersonId: r.guardian_person_id,
-                    relationshipLabel: r.relationship_label || 'Responsável',
-                    isLegalGuardian: Boolean(r.is_legal_guardian),
-                    isFinancialGuardian: Boolean(r.is_financial_guardian),
-                    isEmergencyContact: Boolean(r.is_emergency_contact),
-                    isPickupAuthorized: Boolean(r.is_pickup_authorized),
-                    notes: r.notes,
-                  },
-                };
-              });
-
-              setStudentExistingLinks(loaded);
-              setHasGuardian(true);
-
-              if (loaded[0]?.guardianPerson) {
-                setGuardianName(loaded[0].guardianPerson.fullName || '');
-                setGuardianCpf(loaded[0].guardianPerson.cpf ? formatCPF(loaded[0].guardianPerson.cpf) : '');
-                setGuardianPhone(loaded[0].guardianPerson.phone || '');
-                setGuardianEmail(loaded[0].guardianPerson.email || '');
-                setRelationshipType(loaded[0].relationship.relationshipLabel || 'Pai');
-              }
-            }
-          } catch (err: any) {
-            console.warn('Erro ao consultar vínculos de responsáveis do aluno:', err);
-          }
-        })();
-      }
-    } else {
-      setStudentExistingLinks([]);
-      setRemovedLinkIds([]);
-      setIsAddingAdditionalGuardian(false);
-    }
-
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, guardianPersonToEdit, guardianRelToEdit, studentToEdit, allGuardians, allPersons]);
+  }, [isOpen, tenantId]);
 
   // 1.1. Carregar Planos de Mensalidade Ativos da Academia / Filial
   useEffect(() => {
@@ -385,27 +266,19 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, branchId, studentToEdit]);
+  }, [isOpen, tenantId, branchId, studentToEdit?.id]);
 
   // 2. Carregar Modalidades Reais do Supabase vinculadas à academia ativa (tenant_id)
   useEffect(() => {
     let isMounted = true;
 
     if (!isOpen) {
-      setLoadedArts([]);
-      setLoadedBelts([]);
-      setSelectedArtId('');
-      setSelectedBeltId('');
-      setArtsError(null);
-      setBeltsError(null);
-      setGraduationNotice(null);
       return;
     }
 
     async function loadArts() {
       setIsLoadingArts(true);
       setArtsError(null);
-      setGraduationNotice(null);
 
       try {
         const arts = await studentService.fetchMartialArts(tenantId);
@@ -415,37 +288,26 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
         if (arts.length === 0) {
           setArtsError('Nenhuma modalidade ativa encontrada para esta academia. Cadastre ao menos uma modalidade no menu "Modalidades & Faixas".');
-          setSelectedArtId('');
-          setLoadedBelts([]);
-          setSelectedBeltId('');
           return;
         }
 
         if (studentToEdit) {
-          // Identificar se o aluno possui graduação vinculada a alguma modalidade ativa
           const activeGrad = studentToEdit.currentGraduations?.find((g) =>
             arts.some((a) => a.id === g.martialArtId)
           );
 
           if (activeGrad) {
-            setSelectedArtId(activeGrad.martialArtId);
+            setSelectedArtId((prev) => prev || activeGrad.martialArtId);
           } else {
-            setSelectedArtId('');
             setGraduationNotice(
               'O aluno não possui graduação registrada em nenhuma das modalidades ativas da academia. Selecione a modalidade e a faixa para vincular.'
             );
           }
-        } else {
-          // Cadastro de novo aluno: não seleciona automaticamente
-          setSelectedArtId('');
-          setSelectedBeltId('');
         }
       } catch (err: any) {
         if (!isMounted) return;
         console.error('Falha ao consultar modalidades:', err);
         setArtsError(err.message || 'Não foi possível carregar as modalidades. Verifique sua conexão e tente novamente.');
-        setLoadedArts([]);
-        setSelectedArtId('');
       } finally {
         if (isMounted) {
           setIsLoadingArts(false);
@@ -458,7 +320,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, studentToEdit]);
+  }, [isOpen, tenantId, studentToEdit?.id]);
 
   // 3. Carregar Faixas/Graduações Reais do Supabase correspondentes à modalidade selecionada
   useEffect(() => {
@@ -466,7 +328,6 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
     if (!isOpen || !selectedArtId || !isValidUUID(selectedArtId)) {
       setLoadedBelts([]);
-      setSelectedBeltId('');
       setBeltsError(null);
       setIsLoadingBelts(false);
       return;
@@ -489,7 +350,6 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         }
 
         if (studentToEdit) {
-          // Verificar se o aluno já possui graduação nesta modalidade específica
           const existingGrad = studentToEdit.currentGraduations?.find(
             (g) => g.martialArtId === selectedArtId
           );
@@ -497,27 +357,19 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           if (existingGrad) {
             const matchingBelt = beltsData.find((b) => b.id === existingGrad.beltId);
             if (matchingBelt) {
-              setSelectedBeltId(matchingBelt.id);
+              setSelectedBeltId((prev) => prev || matchingBelt.id);
             } else {
-              setSelectedBeltId('');
               setGraduationNotice(
                 `A faixa registrada anteriormente (${existingGrad.beltName}) não foi encontrada nas graduações cadastradas desta modalidade. Selecione a faixa correspondente para atualizar.`
               );
             }
-          } else {
-            setSelectedBeltId('');
-            setGraduationNotice('O aluno ainda não possui graduação cadastrada nesta modalidade. Selecione a faixa desejada para vincular.');
           }
-        } else {
-          // Cadastro de novo aluno: limpar graduação anterior e exigir seleção válida
-          setSelectedBeltId('');
         }
       } catch (err: any) {
         if (!isMounted) return;
         console.error('Falha ao carregar faixas da modalidade:', err);
         setBeltsError(err.message || 'Não foi possível carregar as faixas da modalidade. Tente novamente.');
         setLoadedBelts([]);
-        setSelectedBeltId('');
       } finally {
         if (isMounted) {
           setIsLoadingBelts(false);
@@ -530,17 +382,82 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, tenantId, selectedArtId, studentToEdit]);
+  }, [isOpen, tenantId, selectedArtId, studentToEdit?.id]);
 
-  // 4. Sincronizar dados pessoais ao abrir para criar ou editar
+  // 4. Sincronizar dados pessoais APENAS ao abrir o modal ou trocar o ID do aluno em edição
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedSessionKeyRef.current = null;
+      return;
+    }
+
+    const currentSessionKey = `${tenantId}:${studentToEdit?.id || 'new'}`;
+    if (initializedSessionKeyRef.current === currentSessionKey) {
+      return;
+    }
+    initializedSessionKeyRef.current = currentSessionKey;
 
     setError('');
     setIsSubmitting(false);
     setStudentCpfStatus(null);
     setGuardianCpfStatus(null);
     setGuardianSearch('');
+    setDraftSavedAt(null);
+    setRestoredFromDraft(false);
+
+    const savedDraft = formDraftStore.loadDraft<{
+      fullName: string;
+      socialName: string;
+      cpf: string;
+      birthDate: string;
+      gender: 'male' | 'female' | 'other';
+      phone: string;
+      email: string;
+      city: string;
+      monthlyFee: string;
+      studentStatus: 'active' | 'inactive' | 'suspended' | 'dropped';
+      selectedPlanId: string;
+      selectedArtId: string;
+      selectedBeltId: string;
+      hasGuardian: boolean;
+      guardianMode: 'select_existing' | 'create_new';
+      guardianName: string;
+      guardianCpf: string;
+      guardianPhone: string;
+      guardianEmail: string;
+      relationshipType: string;
+    }>({
+      tenantId,
+      userId: 'admin',
+      formKey: draftFormKey,
+    });
+
+    if (savedDraft && savedDraft.data) {
+      const d = savedDraft.data;
+      setFullName(d.fullName || '');
+      setSocialName(d.socialName || '');
+      setCpf(d.cpf || '');
+      setBirthDate(d.birthDate || '2014-05-10');
+      setGender(d.gender || 'male');
+      setPhone(d.phone || '');
+      setEmail(d.email || '');
+      setCity(d.city || 'São Paulo');
+      setMonthlyFee(d.monthlyFee || '220');
+      setStudentStatus(d.studentStatus || 'active');
+      setSelectedPlanId(d.selectedPlanId || '');
+      if (d.selectedArtId) setSelectedArtId(d.selectedArtId);
+      if (d.selectedBeltId) setSelectedBeltId(d.selectedBeltId);
+      setHasGuardian(Boolean(d.hasGuardian));
+      setGuardianMode(d.guardianMode || 'select_existing');
+      setGuardianName(d.guardianName || '');
+      setGuardianCpf(d.guardianCpf || '');
+      setGuardianPhone(d.guardianPhone || '');
+      setGuardianEmail(d.guardianEmail || '');
+      setRelationshipType(d.relationshipType || 'Pai');
+      setDraftSavedAt(savedDraft.savedAt);
+      setRestoredFromDraft(true);
+      return;
+    }
 
     if (studentToEdit) {
       const p = activePersonToEdit;
@@ -560,22 +477,53 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setInitialPlanId(curPlan);
       setEffectiveCompetence(getNextCompetence());
 
-      const studentRels = (allGuardians || []).filter((g) => g.studentId === studentToEdit.id);
-      const studentHasGuardian = Boolean(guardianPersonToEdit || studentRels.length > 0 || studentExistingLinks.length > 0);
-
-      // A caixa de seleção reflete fielmente se o aluno já possui responsável vinculado no sistema
-      setHasGuardian(studentHasGuardian);
-
-      if (studentHasGuardian) {
-        const gPerson = guardianPersonToEdit || (studentRels[0] ? (allPersons || []).find((p) => p.id === studentRels[0].guardianPersonId) : undefined) || studentExistingLinks[0]?.guardianPerson;
-        if (gPerson) {
-          setGuardianName(gPerson.fullName || '');
-          setGuardianCpf(gPerson.cpf ? formatCPF(gPerson.cpf) : '');
-          setGuardianPhone(gPerson.phone || '');
-          setGuardianEmail(gPerson.email || '');
-          setRelationshipType(guardianRelToEdit?.relationshipLabel || studentRels[0]?.relationshipLabel || studentExistingLinks[0]?.relationship?.relationshipLabel || 'Pai');
+      const localRels = (allGuardians || []).filter((g) => g.studentId === studentToEdit.id);
+      if (localRels.length > 0) {
+        const localLinks = localRels.map((r) => {
+          const person = (allPersons || []).find((pers) => pers.id === r.guardianPersonId) || guardianPersonToEdit;
+          return {
+            id: r.id,
+            guardianPerson: person || {
+              id: r.guardianPersonId,
+              tenantId,
+              fullName: 'Responsável',
+              cpf: '',
+              birthDate: '1985-01-01',
+              gender: 'other' as const,
+              phone: '',
+              email: '',
+              address: { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
+              createdAt: new Date().toISOString(),
+            },
+            relationship: r,
+          };
+        });
+        setStudentExistingLinks(localLinks);
+        setHasGuardian(true);
+        const primary = localLinks[0];
+        if (primary?.guardianPerson) {
+          setGuardianName(primary.guardianPerson.fullName || '');
+          setGuardianCpf(primary.guardianPerson.cpf ? formatCPF(primary.guardianPerson.cpf) : '');
+          setGuardianPhone(primary.guardianPerson.phone || '');
+          setGuardianEmail(primary.guardianPerson.email || '');
+          setRelationshipType(primary.relationship.relationshipLabel || 'Pai');
         }
+      } else if (guardianPersonToEdit && guardianRelToEdit) {
+        setStudentExistingLinks([
+          {
+            id: guardianRelToEdit.id,
+            guardianPerson: guardianPersonToEdit,
+            relationship: guardianRelToEdit,
+          },
+        ]);
+        setHasGuardian(true);
+        setGuardianName(guardianPersonToEdit.fullName || '');
+        setGuardianCpf(guardianPersonToEdit.cpf ? formatCPF(guardianPersonToEdit.cpf) : '');
+        setGuardianPhone(guardianPersonToEdit.phone || '');
+        setGuardianEmail(guardianPersonToEdit.email || '');
+        setRelationshipType(guardianRelToEdit.relationshipLabel || 'Pai');
       } else {
+        setHasGuardian(false);
         setGuardianName('');
         setGuardianCpf('');
         setGuardianPhone('');
@@ -585,6 +533,9 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       }
     } else {
       // Modo Criação
+      setStudentExistingLinks([]);
+      setRemovedLinkIds([]);
+      setIsAddingAdditionalGuardian(false);
       setFullName('');
       setSocialName('');
       setCpf('');
@@ -597,6 +548,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setStudentStatus('active');
       setSelectedPlanId('');
       setInitialPlanId('');
+      setSelectedArtId('');
+      setSelectedBeltId('');
       setEffectiveCompetence(getNextCompetence());
       setHasGuardian(true);
       setGuardianName('');
@@ -607,7 +560,96 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setSelectedExistingGuardian(null);
       setGuardianMode('select_existing');
     }
-  }, [isOpen, studentToEdit, personToEdit, guardianRelToEdit, guardianPersonToEdit, allGuardians, allPersons]);
+  }, [isOpen, tenantId, studentToEdit?.id, draftFormKey]);
+
+  // 5. Salvamento automático de rascunho temporário
+  useEffect(() => {
+    if (!isOpen) return;
+    const hasTypedContent =
+      fullName.trim() ||
+      cpf.trim() ||
+      phone.trim() ||
+      email.trim() ||
+      guardianName.trim() ||
+      guardianCpf.trim();
+    if (!hasTypedContent) return;
+
+    const timer = setTimeout(() => {
+      const res = formDraftStore.saveDraft(
+        {
+          tenantId,
+          userId: 'admin',
+          formKey: draftFormKey,
+        },
+        {
+          fullName,
+          socialName,
+          cpf,
+          birthDate,
+          gender,
+          phone,
+          email,
+          city,
+          monthlyFee,
+          studentStatus,
+          selectedPlanId,
+          selectedArtId,
+          selectedBeltId,
+          hasGuardian,
+          guardianMode,
+          guardianName,
+          guardianCpf,
+          guardianPhone,
+          guardianEmail,
+          relationshipType,
+        }
+      );
+      if (res.saved) {
+        setDraftSavedAt(res.savedAt);
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [
+    isOpen,
+    tenantId,
+    draftFormKey,
+    fullName,
+    socialName,
+    cpf,
+    birthDate,
+    gender,
+    phone,
+    email,
+    city,
+    monthlyFee,
+    studentStatus,
+    selectedPlanId,
+    selectedArtId,
+    selectedBeltId,
+    hasGuardian,
+    guardianMode,
+    guardianName,
+    guardianCpf,
+    guardianPhone,
+    guardianEmail,
+    relationshipType,
+  ]);
+
+  const clearStudentDraft = () => {
+    formDraftStore.clearDraft({
+      tenantId,
+      userId: 'admin',
+      formKey: draftFormKey,
+    });
+    setDraftSavedAt(null);
+    setRestoredFromDraft(false);
+  };
+
+  const handleCancelAndClearDraft = () => {
+    clearStudentDraft();
+    onClose();
+  };
 
   const handlePlanChange = (planIdValue: string) => {
     setSelectedPlanId(planIdValue);
@@ -1336,6 +1378,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
     try {
       await onSave(newStudent, newPerson, guardianPerson, relationship, payloadDetails);
+      clearStudentDraft();
     } catch (err: any) {
       setError(err?.message || 'Não foi possível salvar o aluno. Tente novamente.');
     } finally {
@@ -1353,20 +1396,29 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           <X className="h-5 w-5" />
         </button>
 
-        <div className="flex items-center gap-2 mb-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600/20 text-red-500">
-            {isEditing ? <Edit className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
+        <div className="flex items-center justify-between gap-2 mb-4 pr-8">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600/20 text-red-500">
+              {isEditing ? <Edit className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">
+                {isEditing ? `Editar Aluno: ${personToEdit?.fullName || fullName}` : 'Cadastrar Novo Aluno'}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {isEditing
+                  ? `Matrícula: ${studentToEdit?.registrationNumber} · Atualize os dados cadastrais, graduação e vínculos familiares.`
+                  : 'Preencha os dados de identificação, graduação inicial e responsáveis com validação matemática de CPF.'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-bold text-white">
-              {isEditing ? `Editar Aluno: ${personToEdit?.fullName || fullName}` : 'Cadastrar Novo Aluno'}
-            </h3>
-            <p className="text-xs text-slate-400">
-              {isEditing
-                ? `Matrícula: ${studentToEdit?.registrationNumber} · Atualize os dados cadastrais, graduação e vínculos familiares.`
-                : 'Preencha os dados de identificação, graduação inicial e responsáveis com validação matemática de CPF.'}
-            </p>
-          </div>
+
+          {draftSavedAt && (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-lg shrink-0">
+              <Save className="h-3 w-3" />
+              <span>{restoredFromDraft ? 'Rascunho restaurado' : 'Rascunho salvo'}</span>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -2152,7 +2204,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
             <button
               type="button"
               disabled={isSubmitting}
-              onClick={onClose}
+              onClick={handleCancelAndClearDraft}
               className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
             >
               Cancelar

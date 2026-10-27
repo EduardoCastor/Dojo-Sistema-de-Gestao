@@ -35,6 +35,7 @@ export interface Tenant {
   tradeName: string; // Nome Fantasia
   legalName: string; // Razão Social
   cnpjOrCpf: string;
+  cnpj?: string;
   adminName: string;
   email: string;
   phone: string;
@@ -49,6 +50,7 @@ export interface Tenant {
     city: string;
     state: string;
     zipCode: string;
+    zip?: string;
   };
   planId: SaaSPlanId;
   status: 'trial' | 'active' | 'suspended' | 'canceled';
@@ -63,6 +65,12 @@ export interface Tenant {
     familyDiscount2ndMember: number; // % desconto 2º membro
     multiArtDiscount: number; // % desconto 2ª modalidade
     customBrandColor?: string;
+    allowMultipleCheckinsPerDay?: boolean;
+    requireMedicalClearance?: boolean;
+    autoBlockDelinquentAfterDays?: number;
+    pixKey?: string;
+    pixBeneficiaryName?: string;
+    defaultLateFeePercent?: number;
   };
 }
 
@@ -78,6 +86,16 @@ export interface Branch {
   active: boolean;
 }
 
+export type PortalAccessStatus = 'none' | 'invited' | 'active' | 'blocked' | 'revoked';
+
+export type SecondaryRoleEntry =
+  | UserRole
+  | {
+      role: UserRole;
+      studentId?: string;
+      guardianPersonId?: string;
+    };
+
 export interface User {
   id: string;
   tenantId: string; // 'platform' for superadmin
@@ -85,11 +103,12 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  secondaryRoles?: SecondaryRoleEntry[]; // Ex: ['guardian', 'student'] quando o responsável também é aluno
   avatarUrl?: string;
   phone?: string;
   active: boolean;
-  studentId?: string; // If role is 'student'
-  guardianPersonId?: string; // If role is 'guardian'
+  studentId?: string; // If role is 'student' or also a student
+  guardianPersonId?: string; // If role is 'guardian' or also a guardian
   invitedByUserId?: string;
   createdAt?: string;
 }
@@ -103,10 +122,33 @@ export interface TenantUserInvitation {
   role: Exclude<UserRole, 'superadmin'>;
   phone?: string;
   status: 'invited' | 'accepted' | 'revoked' | 'expired';
+  inviteCode?: string;
+  targetStudentId?: string;
+  targetGuardianPersonId?: string;
   invitedByUserId: string;
   invitedByName: string;
   createdAt: string;
   expiresAt: string;
+}
+
+export interface LegalAcceptanceRecord {
+  id: string;
+  userId: string;
+  tenantId?: string;
+  email?: string;
+  termsVersion: string;
+  privacyVersion: string;
+  acceptanceContext:
+    | 'academy_registration'
+    | 'user_signup'
+    | 'account_signup'
+    | 'portal_activation'
+    | 'terms_update'
+    | 'test_verification';
+  acceptedTerms: boolean;
+  acknowledgedPrivacy: boolean;
+  specificConsents?: Record<string, boolean>;
+  acceptedAt: string;
 }
 
 export interface Person {
@@ -120,9 +162,12 @@ export interface Person {
   phone: string;
   email: string;
   photoUrl?: string;
+  userId?: string;
+  portalAccessStatus?: PortalAccessStatus;
   address: {
     street: string;
     number: string;
+    complement?: string;
     neighborhood: string;
     city: string;
     state: string;
@@ -281,9 +326,12 @@ export interface StudentGraduation {
   martialArtName?: string;
   beltRankId: string;
   beltRankName?: string;
+  newBeltName?: string;
   beltColorHex?: string;
   graduatedAt: string; // YYYY-MM-DD
+  graduationDate?: string;
   examinerName: string;
+  evaluatorName?: string;
   branchName?: string;
   certificateCode?: string;
   notes?: string;
@@ -292,6 +340,8 @@ export interface StudentGraduation {
   hasInconsistency?: boolean;
   inconsistencyMessage?: string;
 }
+
+export type GraduationEvent = StudentGraduation;
 
 export interface RecordGraduationPayload {
   tenantId: string;
@@ -351,6 +401,9 @@ export interface Student {
   monthlyFee: number;
   planId?: string;
   notes?: string;
+  userId?: string;
+  portalAccessStatus?: PortalAccessStatus;
+  allowAnthropometryView?: boolean;
 }
 
 export interface ClassSchedule {
@@ -432,6 +485,7 @@ export interface Enrollment {
   branchId: string;
   studentId: string;
   classGroupId: string;
+  classId?: string;
   enrolledAt: string;
   status: 'active' | 'paused' | 'canceled';
 }
@@ -461,11 +515,13 @@ export interface AttendanceRecord {
   id: string;
   tenantId: string;
   classGroupId: string;
+  classId?: string;
   sessionId?: string;
   studentId: string;
   date: string; // YYYY-MM-DD
   status: 'present' | 'absent' | 'late' | 'excused';
   notes?: string;
+  justification?: string;
   recordedByUserName: string;
   recordedByUserId?: string;
   recordedAt: string;
@@ -491,6 +547,7 @@ export interface Invoice {
   balance: number;
   status: 'pending' | 'overdue' | 'paid' | 'partially_paid' | 'canceled';
   paymentDate?: string;
+  paidDate?: string;
   paymentMethod?: 'pix' | 'boleto' | 'credit_card' | 'cash';
   pixCode?: string;
   receiptNumber?: string;
