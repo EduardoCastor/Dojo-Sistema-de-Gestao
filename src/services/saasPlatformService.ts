@@ -1225,28 +1225,65 @@ export const saasPlatformService = {
    * Consulta o estado real do bootstrap e das migrations 25/26 no banco de dados.
    * Não presume que a migration está pendente sem verificar a função RPC no Supabase.
    */
-  async checkBootstrapStatus(): Promise<{
+  async checkBootstrapStatus(candidateEmail?: string): Promise<{
     supabaseConnected: boolean;
     migration25Applied: boolean;
     migration26Applied: boolean;
+    migration27Applied: boolean;
     authorizedOwnerEmail: string;
+    authorizedOwnerEmails: string[];
     accountExists: boolean;
     emailConfirmed: boolean;
     bootstrapCompleted: boolean;
   }> {
     const localState = DataStore.getPlatformBootstrapState();
+    const fallbackEmails = [...OFFICIAL_DOMAINS.platformOwnerEmails];
+    const targetEmail = (candidateEmail || OFFICIAL_DOMAINS.platformOwnerEmail).trim().toLowerCase();
+
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase.rpc('get_platform_bootstrap_status');
+        const { data, error } = await supabase.rpc('get_platform_bootstrap_status', {
+          p_email: targetEmail,
+        });
         if (!error && data) {
+          const authEmails = Array.isArray(data.authorized_emails) && data.authorized_emails.length > 0
+            ? data.authorized_emails
+            : fallbackEmails;
           return {
             supabaseConnected: true,
             migration25Applied: Boolean(data.migration_25_applied ?? true),
             migration26Applied: Boolean(data.migration_26_applied ?? true),
-            authorizedOwnerEmail: String(data.authorized_owner_email || OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL),
-            accountExists: Boolean(data.account_exists),
-            emailConfirmed: Boolean(data.email_confirmed),
-            bootstrapCompleted: Boolean(data.bootstrap_completed),
+            migration27Applied: Boolean(data.migration_27_applied ?? true),
+            authorizedOwnerEmail: String(data.authorized_owner_email || targetEmail),
+            authorizedOwnerEmails: authEmails,
+            accountExists: Boolean(data.account_exists || localState.bootstrapped),
+            emailConfirmed: Boolean(data.email_confirmed || localState.bootstrapped),
+            bootstrapCompleted: Boolean(
+              data.bootstrap_completed ||
+                (localState.bootstrapped &&
+                  (localState.bootstrappedEmails?.includes(targetEmail) ||
+                    localState.ownerEmail.toLowerCase() === targetEmail))
+            ),
+          };
+        }
+        // Se a função get_platform_bootstrap_status falhar na assinatura com parâmetro, tentar sem parâmetros
+        const { data: dataNoParam, error: errNoParam } = await supabase.rpc('get_platform_bootstrap_status');
+        if (!errNoParam && dataNoParam) {
+          return {
+            supabaseConnected: true,
+            migration25Applied: Boolean(dataNoParam.migration_25_applied ?? true),
+            migration26Applied: Boolean(dataNoParam.migration_26_applied ?? true),
+            migration27Applied: Boolean(dataNoParam.migration_27_applied ?? false),
+            authorizedOwnerEmail: String(dataNoParam.authorized_owner_email || targetEmail),
+            authorizedOwnerEmails: fallbackEmails,
+            accountExists: Boolean(dataNoParam.account_exists || localState.bootstrapped),
+            emailConfirmed: Boolean(dataNoParam.email_confirmed || localState.bootstrapped),
+            bootstrapCompleted: Boolean(
+              dataNoParam.bootstrap_completed ||
+                (localState.bootstrapped &&
+                  (localState.bootstrappedEmails?.includes(targetEmail) ||
+                    localState.ownerEmail.toLowerCase() === targetEmail))
+            ),
           };
         }
         // Se a função get_platform_bootstrap_status não existir ainda (PGRST202), verificar se a tabela de planos da Migration 25 responde
@@ -1260,7 +1297,9 @@ export const saasPlatformService = {
             supabaseConnected: true,
             migration25Applied: mig25Present,
             migration26Applied: false,
-            authorizedOwnerEmail: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
+            migration27Applied: false,
+            authorizedOwnerEmail: targetEmail,
+            authorizedOwnerEmails: fallbackEmails,
             accountExists: localState.bootstrapped,
             emailConfirmed: localState.bootstrapped,
             bootstrapCompleted: localState.bootstrapped,
@@ -1271,14 +1310,21 @@ export const saasPlatformService = {
       }
     }
 
+    const isBootstrappedForEmail = Boolean(
+      localState.bootstrappedEmails?.includes(targetEmail) ||
+      (localState.bootstrapped && localState.ownerEmail.toLowerCase() === targetEmail)
+    );
+
     return {
       supabaseConnected: false,
       migration25Applied: true,
       migration26Applied: true,
-      authorizedOwnerEmail: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
-      accountExists: localState.bootstrapped,
-      emailConfirmed: localState.bootstrapped,
-      bootstrapCompleted: localState.bootstrapped,
+      migration27Applied: true,
+      authorizedOwnerEmail: targetEmail,
+      authorizedOwnerEmails: fallbackEmails,
+      accountExists: isBootstrappedForEmail,
+      emailConfirmed: isBootstrappedForEmail,
+      bootstrapCompleted: isBootstrappedForEmail,
     };
   },
 
@@ -1303,7 +1349,7 @@ export const saasPlatformService = {
       return {
         authorized: false,
         reason: 'unauthorized_email',
-        message: `Acesso negado (403): a conta "${normalizedEmail || 'desconhecida'}" não possui privilégios de Administrador Global do SaaS. O painel ${OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL} é exclusivo para ${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}.`,
+        message: `Acesso negado (403): o endereço "${normalizedEmail || 'desconhecido'}" não possui privilégios de Administrador Global do SaaS. O painel ${OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL} é restrito aos administradores autorizados: ${OFFICIAL_DOMAINS.platformOwnerEmails.join(' e ')}.`,
       };
     }
 
@@ -1416,7 +1462,7 @@ export const saasPlatformService = {
     const normalizedEmail = params.email.trim().toLowerCase();
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
       throw new Error(
-        `Acesso negado (403): o bootstrap global é exclusivo para ${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}.`
+        `Acesso negado (403): o endereço "${normalizedEmail}" não possui autorização. O bootstrap global é exclusivo para os administradores autorizados: ${OFFICIAL_DOMAINS.platformOwnerEmails.join(' e ')}.`
       );
     }
     if (!params.setupToken || params.setupToken.trim().length < 6) {
@@ -1428,10 +1474,10 @@ export const saasPlatformService = {
       throw new Error('Defina uma senha forte com no mínimo 6 caracteres.');
     }
 
-    const bootstrapState = DataStore.getPlatformBootstrapState();
-    if (bootstrapState.bootstrapped) {
+    const currentStatus = await this.checkBootstrapStatus(normalizedEmail);
+    if (currentStatus.bootstrapCompleted) {
       throw new Error(
-        `O bootstrap inicial do proprietário (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) já foi concluído anteriormente. Utilize o fluxo de Login ou Recuperação de Senha.`
+        `O bootstrap do administrador (${normalizedEmail}) já foi concluído anteriormente. Utilize o fluxo de Login ou Recuperação de Senha.`
       );
     }
 
@@ -1457,7 +1503,7 @@ export const saasPlatformService = {
 
         return {
           success: true,
-          message: 'Proprietário global inicializado e verificado com sucesso via Edge Function.',
+          message: 'Administrador global inicializado e verificado com sucesso via Edge Function.',
           user: ownerUser,
         };
       }
@@ -1476,13 +1522,13 @@ export const saasPlatformService = {
 
     return {
       success: true,
-      message: 'Proprietário global inicializado com sucesso.',
+      message: 'Administrador global inicializado com sucesso.',
       user: ownerUser,
     };
   },
 
   /**
-   * Bootstrap seguro do proprietário global do SaaS (admin@tatameclub.com.br).
+   * Bootstrap seguro dos administradores globais do SaaS (admin@tatameclub.com.br e beaverstraining@gmail.com).
    * NUNCA utiliza senha fixa no código-fonte. Valida estritamente a identidade do e-mail autorizado,
    * evita duplicidade de contas e impede repetição indevida do bootstrap inicial.
    */
@@ -1497,16 +1543,19 @@ export const saasPlatformService = {
     const normalizedEmail = params.email.trim().toLowerCase();
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
       throw new Error(
-        `Acesso negado (403): o endereço "${normalizedEmail}" não corresponde à conta oficial do proprietário da plataforma (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}).`
+        `Acesso negado (403): o endereço "${normalizedEmail}" não corresponde a um administrador global autorizado (${OFFICIAL_DOMAINS.platformOwnerEmails.join(' e ')}).`
       );
     }
 
     const bootstrapState = DataStore.getPlatformBootstrapState();
+    const allUsers = DataStore.getAllUsers();
 
-    // Quando enforceOneTimeBootstrap = true (fluxo explícito de 1º acesso), impedir repetição se já inicializado
-    if (params.enforceOneTimeBootstrap && bootstrapState.bootstrapped) {
+    // Quando enforceOneTimeBootstrap = true (fluxo explícito de 1º acesso), verificar se já inicializado
+    const bootstrappedList = bootstrapState.bootstrappedEmails || [];
+    const alreadyBootstrapped = bootstrappedList.includes(normalizedEmail);
+    if (params.enforceOneTimeBootstrap && alreadyBootstrapped) {
       throw new Error(
-        `O bootstrap inicial do proprietário (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) já foi concluído anteriormente. Utilize o fluxo de Login ou Recuperação de Senha.`
+        `O bootstrap do administrador (${normalizedEmail}) já foi concluído anteriormente. Utilize o fluxo de Login ou Recuperação de Senha.`
       );
     }
 
@@ -1520,8 +1569,6 @@ export const saasPlatformService = {
       }
     }
 
-    const allUsers = DataStore.getAllUsers();
-
     // Impedir que um usuário comum existente de academia seja convertido em superadmin
     const conflictingAcademyUser = allUsers.find(
       (u) => u.email.toLowerCase() === normalizedEmail && u.role !== 'superadmin'
@@ -1532,19 +1579,30 @@ export const saasPlatformService = {
       );
     }
 
-    // Buscar conta superadmin existente (sem criar duplicatas)
+    // Buscar conta superadmin correspondente (sem criar duplicatas)
     let ownerUser = allUsers.find(
       (u) =>
-        (u.email.toLowerCase() === OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL && u.role === 'superadmin') ||
-        (u.id === 'user-superadmin' && u.role === 'superadmin')
+        (u.email.toLowerCase() === normalizedEmail && u.role === 'superadmin') ||
+        (normalizedEmail === 'admin@tatameclub.com.br' && u.id === 'user-superadmin' && u.role === 'superadmin') ||
+        (normalizedEmail === 'beaverstraining@gmail.com' && u.id === 'user-superadmin-beavers' && u.role === 'superadmin')
     );
+
+    const defaultAdminName =
+      normalizedEmail === 'beaverstraining@gmail.com'
+        ? 'Administrador Global Tatame Club'
+        : 'Proprietário Tatame Club';
+
+    const defaultAdminId =
+      normalizedEmail === 'beaverstraining@gmail.com'
+        ? 'user-superadmin-beavers'
+        : 'user-superadmin';
 
     if (!ownerUser) {
       ownerUser = {
-        id: params.userId || 'user-superadmin',
+        id: params.userId || defaultAdminId,
         tenantId: 'platform',
-        name: params.fullName?.trim() || 'Proprietário Tatame Club',
-        email: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
+        name: params.fullName?.trim() || defaultAdminName,
+        email: normalizedEmail,
         role: 'superadmin',
         phone: '(11) 99999-0000',
         active: true,
@@ -1554,7 +1612,7 @@ export const saasPlatformService = {
       if (params.userId) {
         ownerUser.id = params.userId;
       }
-      ownerUser.email = OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL;
+      ownerUser.email = normalizedEmail;
       ownerUser.role = 'superadmin';
       ownerUser.tenantId = 'platform';
       ownerUser.active = true;
@@ -1564,10 +1622,14 @@ export const saasPlatformService = {
       DataStore.saveUsers(allUsers);
     }
 
+    const updatedBootstrappedEmails = Array.from(
+      new Set([...(bootstrapState.bootstrappedEmails || []), normalizedEmail])
+    );
     DataStore.savePlatformBootstrapState({
       ...bootstrapState,
       bootstrapped: true,
-      ownerEmail: OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL,
+      bootstrappedEmails: updatedBootstrappedEmails,
+      ownerEmail: normalizedEmail,
       bootstrappedAt: bootstrapState.bootstrappedAt || new Date().toISOString(),
     });
 
@@ -1577,7 +1639,7 @@ export const saasPlatformService = {
       'bootstrap_platform_owner',
       'user',
       ownerUser.id,
-      `Proprietário global da plataforma Tatame Club (${OFFICIAL_DOMAINS.PLATFORM_OWNER_EMAIL}) verificado e habilitado com segurança.`
+      `Administrador global da plataforma Tatame Club (${normalizedEmail}) verificado e habilitado com segurança.`
     );
 
     return ownerUser;

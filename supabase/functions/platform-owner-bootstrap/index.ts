@@ -41,11 +41,18 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const expectedBootstrapSecret = Deno.env.get('PLATFORM_BOOTSTRAP_SECRET') ?? '';
-    const authorizedOwnerEmail = (
-      Deno.env.get('PLATFORM_OWNER_EMAIL') ?? 'admin@tatameclub.com.br'
-    )
-      .trim()
-      .toLowerCase();
+    const rawEnvEmails = Deno.env.get('PLATFORM_OWNER_EMAILS') ?? Deno.env.get('PLATFORM_OWNER_EMAIL') ?? '';
+    const authorizedOwnerEmails = new Set<string>([
+      'admin@tatameclub.com.br',
+      'beaverstraining@gmail.com',
+    ]);
+    if (rawEnvEmails) {
+      rawEnvEmails
+        .split(/[,;\s]+/)
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes('@'))
+        .forEach((e) => authorizedOwnerEmails.add(e));
+    }
 
     if (!supabaseUrl || !serviceRoleKey) {
       return new Response(
@@ -62,10 +69,10 @@ Deno.serve(async (req: Request) => {
     ).trim();
 
     // 1. Validar e-mail autorizado
-    if (!email || email !== authorizedOwnerEmail) {
+    if (!email || !authorizedOwnerEmails.has(email)) {
       return new Response(
         JSON.stringify({
-          error: `Acesso negado (403): o bootstrap global é exclusivo para ${authorizedOwnerEmail}.`,
+          error: `Acesso negado (403): o endereço "${email}" não possui autorização. O bootstrap global é exclusivo para os administradores autorizados (${Array.from(authorizedOwnerEmails).join(', ')}).`,
           code: 'UNAUTHORIZED_EMAIL',
         }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -98,13 +105,15 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 3. Verificar estado atual do bootstrap no banco
-    const { data: statusData } = await supabaseAdmin.rpc('get_platform_bootstrap_status');
+    // 3. Verificar estado atual do bootstrap no banco para este e-mail
+    const { data: statusData } = await supabaseAdmin.rpc('get_platform_bootstrap_status', {
+      p_email: email,
+    });
     if (statusData?.bootstrap_completed === true) {
       return new Response(
         JSON.stringify({
           error:
-            'O bootstrap do proprietário global já foi concluído anteriormente. Utilize a aba de Login ou Recuperação de Senha.',
+            `O bootstrap do administrador ${email} já foi concluído anteriormente. Utilize a aba de Login ou Recuperação de Senha.`,
           code: 'BOOTSTRAP_ALREADY_COMPLETED',
         }),
         { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -121,7 +130,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const existingUser = usersList?.users?.find(
-      (u) => (u.email ?? '').toLowerCase() === authorizedOwnerEmail
+      (u) => (u.email ?? '').toLowerCase() === email
     );
 
     let targetUserId: string;
@@ -133,17 +142,17 @@ Deno.serve(async (req: Request) => {
         email_confirm: true,
         user_metadata: {
           ...(existingUser.user_metadata || {}),
-          full_name: 'Proprietário Tatame Club SaaS',
+          full_name: 'Administrador Global Tatame Club',
         },
       });
       if (updateErr) throw updateErr;
     } else {
       const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-        email: authorizedOwnerEmail,
+        email: email,
         password,
         email_confirm: true,
         user_metadata: {
-          full_name: 'Proprietário Tatame Club SaaS',
+          full_name: 'Administrador Global Tatame Club',
         },
       });
       if (createErr || !created.user) {
@@ -156,7 +165,7 @@ Deno.serve(async (req: Request) => {
     const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc(
       'bootstrap_platform_owner_by_email',
       {
-        p_email: authorizedOwnerEmail,
+        p_email: email,
         p_reason: 'Inicialização via Edge Function protegida platform-owner-bootstrap',
       }
     );
@@ -169,7 +178,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         userId: targetUserId,
-        email: authorizedOwnerEmail,
+        email: email,
         existingAccountUpdated: Boolean(existingUser),
         bootstrap: rpcResult,
       }),

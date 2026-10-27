@@ -76,7 +76,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
     let isMounted = true;
 
     async function inspectEnvironment() {
-      const status = await saasPlatformService.checkBootstrapStatus();
+      const status = await saasPlatformService.checkBootstrapStatus(email);
       if (!isMounted) return;
       setBootstrapStatus({
         checked: true,
@@ -91,8 +91,9 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
         if (!isMounted) return;
         if (event === 'PASSWORD_RECOVERY') {
           setMode('update_password');
+          const recoveryEmail = (session?.user?.email || email).toLowerCase();
           setInfoMessage(
-            `Sessão de redefinição de senha validada para ${OFFICIAL_DOMAINS.platformOwnerEmail}. Defina sua nova senha abaixo.`
+            `Sessão de redefinição de senha validada para ${recoveryEmail}. Defina sua nova senha abaixo.`
           );
           setError(null);
         } else if (event === 'SIGNED_IN' && session?.user && supabase) {
@@ -123,7 +124,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [email]);
 
   const handleLocalSandboxAccess = async () => {
     setError(null);
@@ -132,7 +133,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
       setError(
-        `Acesso negado (403): o Painel Global do SaaS (${OFFICIAL_DOMAINS.saasAdminHost}) é restrito exclusivamente à conta proprietária ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
+        `Acesso negado (403): o Painel Global do SaaS (${OFFICIAL_DOMAINS.saasAdminHost}) é restrito aos administradores autorizados: ${OFFICIAL_DOMAINS.platformOwnerEmails.join(' e ')}.`
       );
       return;
     }
@@ -170,10 +171,10 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // 1. Validação estrita do endereço do proprietário global
+    // 1. Validação estrita do endereço dos administradores globais
     if (!isAuthorizedPlatformOwnerEmail(normalizedEmail)) {
       setError(
-        `Acesso negado (403): o endereço "${normalizedEmail}" não possui autorização para administrar o SaaS. O painel ${OFFICIAL_DOMAINS.saasAdminHost} é exclusivo para ${OFFICIAL_DOMAINS.platformOwnerEmail}.`
+        `Acesso negado (403): o endereço "${normalizedEmail}" não possui autorização para administrar o SaaS. O painel ${OFFICIAL_DOMAINS.saasAdminHost} é exclusivo para ${OFFICIAL_DOMAINS.platformOwnerEmails.join(' e ')}.`
       );
       return;
     }
@@ -263,7 +264,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
     setLoading(true);
     try {
-      // 4. Fluxo de 1º Acesso (Criar Senha e Inicializar Proprietário com Segurança)
+      // 4. Fluxo de 1º Acesso (Criar Senha e Inicializar Administrador com Segurança)
       if (mode === 'bootstrap') {
         if (password !== confirmPassword) {
           setError('A confirmação de senha não confere com a senha digitada.');
@@ -272,10 +273,10 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
         }
 
         // Impedir repetição indevida se o bootstrap já estiver concluído no banco
-        const currentStatus = await saasPlatformService.checkBootstrapStatus();
+        const currentStatus = await saasPlatformService.checkBootstrapStatus(normalizedEmail);
         if (currentStatus.bootstrapCompleted) {
           setError(
-            `A conta ${OFFICIAL_DOMAINS.platformOwnerEmail} já foi inicializada anteriormente como Proprietário Global. Não é permitido repetir o bootstrap. Utilize a aba "Login" ou "Recuperar Senha".`
+            `A conta ${normalizedEmail} já foi inicializada anteriormente como Administrador Global. Não é permitido repetir o bootstrap. Utilize a aba "Login" ou "Recuperar Senha".`
           );
           setMode('login');
           setLoading(false);
@@ -296,10 +297,14 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
         if (isSupabaseConfigured() && supabase) {
           const redirectUrl = getAuthRedirectUrl('saas_admin_panel');
+          const adminTitle = isAuthorizedPlatformOwnerEmail(normalizedEmail)
+            ? 'Administrador Global Tatame Club'
+            : 'Proprietário Tatame Club SaaS';
+
           const { data: signUpData, error: signUpError } = await authService.signUpWithEmail(
             normalizedEmail,
             password,
-            'Proprietário Tatame Club SaaS',
+            adminTitle,
             redirectUrl
           );
 
@@ -345,7 +350,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
             const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
               id: signUpData.user.id,
               email: normalizedEmail,
-              name: 'Proprietário Tatame Club SaaS',
+              name: adminTitle,
             });
             if (verification.authorized && verification.user) {
               onAuthenticatedSuperAdmin(verification.user);
@@ -355,7 +360,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
           // Fluxo padrão com confirmação de e-mail ativa no Supabase Auth
           setInfoMessage(
-            `Solicitação de 1º acesso registrada! Para impedir que terceiros assumam a conta, um link de confirmação foi enviado para ${normalizedEmail}. Confirme no seu e-mail (ou execute "SELECT public.bootstrap_platform_owner_by_email('admin@tatameclub.com.br');" no SQL Editor do Supabase) e depois faça login.`
+            `Solicitação de 1º acesso registrada! Para segurança da conta, um link de confirmação foi enviado para ${normalizedEmail}. Confirme no seu e-mail (ou execute "SELECT public.bootstrap_platform_owner_by_email('${normalizedEmail}');" no SQL Editor do Supabase) e depois faça login.`
           );
           setMode('login');
           return;
@@ -384,11 +389,11 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
           const rawMsg = (signInError.message || '').toLowerCase();
           if (rawMsg.includes('email not confirmed')) {
             setError(
-              `O endereço ${normalizedEmail} já foi criado, mas aguarda confirmação de e-mail. Verifique a caixa de entrada de ${normalizedEmail} ou execute "SELECT public.bootstrap_platform_owner_by_email('admin@tatameclub.com.br');" no SQL Editor do Supabase.`
+              `O endereço ${normalizedEmail} já foi criado, mas aguarda confirmação de e-mail. Verifique a caixa de entrada de ${normalizedEmail} ou execute "SELECT public.bootstrap_platform_owner_by_email('${normalizedEmail}');" no SQL Editor do Supabase.`
             );
           } else if (rawMsg.includes('invalid login credentials')) {
-            const currentStatus = await saasPlatformService.checkBootstrapStatus();
-            if (currentStatus.migration26Applied && !currentStatus.accountExists) {
+            const currentStatus = await saasPlatformService.checkBootstrapStatus(normalizedEmail);
+            if ((currentStatus.migration26Applied || currentStatus.migration27Applied) && !currentStatus.accountExists) {
               setError(
                 `A conta ${normalizedEmail} ainda não foi inicializada no Supabase Auth. Utilize a aba "1º Acesso (Criar Senha)" acima para configurar sua senha com segurança.`
               );
@@ -437,7 +442,7 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
         const verification = await saasPlatformService.verifyPlatformAdminAuthorization({
           id: 'user-superadmin',
           email: normalizedEmail,
-          name: 'Proprietário Tatame Club',
+          name: 'Administrador Global Tatame Club',
         });
         if (!verification.authorized || !verification.user) {
           setError(verification.message);
@@ -589,9 +594,34 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                E-mail Administrativo Autorizado
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-zinc-300">
+                  E-mails Administrativos Autorizados
+                </label>
+                <span className="text-[11px] text-amber-400/90 font-medium">2 contas com acesso global</span>
+              </div>
+
+              {/* Seletor rápido dos e-mails autorizados */}
+              <div className="flex flex-wrap gap-1.5 mb-2.5">
+                {OFFICIAL_DOMAINS.platformOwnerEmails.map((authEmail) => (
+                  <button
+                    key={authEmail}
+                    type="button"
+                    onClick={() => {
+                      setEmail(authEmail);
+                      setError(null);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium border transition-all cursor-pointer ${
+                      email.trim().toLowerCase() === authEmail.toLowerCase()
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 font-semibold shadow-sm'
+                        : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:border-zinc-700'
+                    }`}
+                  >
+                    {authEmail}
+                  </button>
+                ))}
+              </div>
+
               <div className="relative">
                 <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
                 <input
@@ -599,15 +629,17 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={OFFICIAL_DOMAINS.platformOwnerEmail}
+                  placeholder={OFFICIAL_DOMAINS.platformOwnerEmails.join(' ou ')}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
-              <p className="text-[11px] text-zinc-500 mt-1 flex items-center gap-1">
+              <p className="text-[11px] text-zinc-400 mt-1.5 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>
-                  Identidade global configurada:{' '}
-                  <code className="text-amber-400 font-semibold">{OFFICIAL_DOMAINS.platformOwnerEmail}</code>
+                  Administradores globais autorizados:{' '}
+                  <code className="text-amber-400 font-semibold">
+                    {OFFICIAL_DOMAINS.platformOwnerEmails.join(' • ')}
+                  </code>
                 </span>
               </p>
             </div>
@@ -725,18 +757,43 @@ export const PlatformAdminAuthView: React.FC<PlatformAdminAuthViewProps> = ({
           </form>
 
           {!isSupabaseConfigured() && (
-            <div className="pt-4 border-t border-zinc-800/80 space-y-2">
+            <div className="pt-4 border-t border-zinc-800/80 space-y-2.5">
               <p className="text-[11px] text-zinc-400 text-center">
                 Ambiente de Homologação Local (Supabase remoto não configurado nas variáveis de ambiente):
               </p>
-              <button
-                type="button"
-                disabled={loading}
-                onClick={handleLocalSandboxAccess}
-                className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold text-xs transition-colors cursor-pointer"
-              >
-                Validar Acesso Local ({OFFICIAL_DOMAINS.platformOwnerEmail})
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {OFFICIAL_DOMAINS.platformOwnerEmails.map((authEmail) => (
+                  <button
+                    key={authEmail}
+                    type="button"
+                    disabled={loading}
+                    onClick={async () => {
+                      setEmail(authEmail);
+                      setError(null);
+                      setLoading(true);
+                      try {
+                        const ownerUser = await saasPlatformService.bootstrapPlatformOwner({
+                          email: authEmail,
+                          isVerifiedSession: true,
+                        });
+                        const check = await saasPlatformService.verifyPlatformAdminAuthorization(ownerUser);
+                        if (check.authorized && check.user) {
+                          onAuthenticatedSuperAdmin(check.user);
+                        } else {
+                          setError(check.message);
+                        }
+                      } catch (err: any) {
+                        setError(err?.message || 'Erro ao validar acesso local.');
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-medium text-xs transition-colors cursor-pointer text-center"
+                  >
+                    Validar: <strong className="font-mono text-amber-300 block truncate">{authEmail}</strong>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

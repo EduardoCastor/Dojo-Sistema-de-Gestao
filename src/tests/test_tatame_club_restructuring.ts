@@ -66,11 +66,19 @@ async function runTests() {
   );
   assert(
     isAuthorizedPlatformOwnerEmail('admin@tatameclub.com.br') === true,
-    'admin@tatameclub.com.br deve ser reconhecido como proprietário autorizado'
+    'admin@tatameclub.com.br deve ser reconhecido como administrador autorizado'
   );
   assert(
-    isAuthorizedPlatformOwnerEmail('beaverstraining@gmail.com') === false,
-    'E-mail antigo beaverstraining@gmail.com não deve ser o endereço ativo padrão'
+    isAuthorizedPlatformOwnerEmail('beaverstraining@gmail.com') === true,
+    'beaverstraining@gmail.com deve ser reconhecido como administrador global autorizado'
+  );
+  assert(
+    isAuthorizedPlatformOwnerEmail('BEAVERSTRAINING@GMAIL.COM') === true,
+    'Comparação de e-mail deve ser insensível a maiúsculas/minúsculas'
+  );
+  assert(
+    isAuthorizedPlatformOwnerEmail('  admin@tatameclub.com.br  ') === true,
+    'Comparação de e-mail deve ignorar espaços acidentais'
   );
   assert(
     isAuthorizedPlatformOwnerEmail('sensei@kodokanbrasil.com.br') === false,
@@ -162,12 +170,19 @@ async function runTests() {
     email: 'admin@tatameclub.com.br',
     isVerifiedSession: true,
   });
-  const superAdminUsers = DataStore.getAllUsers().filter(
-    (u) => u.email.toLowerCase() === 'admin@tatameclub.com.br' || u.role === 'superadmin'
+  const admin1Users = DataStore.getAllUsers().filter(
+    (u) => u.email.toLowerCase() === 'admin@tatameclub.com.br'
+  );
+  const admin2Users = DataStore.getAllUsers().filter(
+    (u) => u.email.toLowerCase() === 'beaverstraining@gmail.com'
   );
   assert(
-    superAdminUsers.length === 1,
-    `Não deve haver duplicidade de contas superadmin (encontrado: ${superAdminUsers.length})`
+    admin1Users.length === 1,
+    `Não deve haver duplicidade para admin@tatameclub.com.br (encontrado: ${admin1Users.length})`
+  );
+  assert(
+    admin2Users.length === 1,
+    `Não deve haver duplicidade para beaverstraining@gmail.com (encontrado: ${admin2Users.length})`
   );
   console.log('   ✅ [Caso B] Prevenção de duplicidade e bloqueio de re-bootstrap validados.');
 
@@ -210,7 +225,7 @@ async function runTests() {
   console.log('   ✅ [Caso C] Credenciais/tokens inválidos rejeitados sem alterar privilégios.');
 
   // --------------------------------------------------------------------------
-  // CASO D — Usuário sem autorização global (Owner de academia, aluno ou e-mail antigo)
+  // CASO D — Usuário sem autorização global (Owner de academia, aluno ou invasor)
   // --------------------------------------------------------------------------
   console.log('5. [Caso D] Testando bloqueio de usuários sem autorização global...');
   await expectThrowsAsync(
@@ -218,8 +233,8 @@ async function runTests() {
     'Bootstrap deve negar e-mail de academia comum'
   );
   await expectThrowsAsync(
-    () => saasPlatformService.bootstrapPlatformOwner({ email: 'beaverstraining@gmail.com' }),
-    'Bootstrap deve negar o endereço antigo beaverstraining@gmail.com'
+    () => saasPlatformService.bootstrapPlatformOwner({ email: 'invasor@externo.com' }),
+    'Bootstrap deve negar e-mail não autorizado'
   );
 
   const verifyAcademyOwner = await saasPlatformService.verifyPlatformAdminAuthorization({
@@ -232,16 +247,17 @@ async function runTests() {
     'Administrador de academia (owner) deve ter acesso negado ao painel global'
   );
 
-  const verifyLegacyEmail = await saasPlatformService.verifyPlatformAdminAuthorization({
-    id: 'legacy-id',
+  // beaverstraining@gmail.com agora é um dos dois administradores globais autorizados
+  const verifyBeaversAdmin = await saasPlatformService.verifyPlatformAdminAuthorization({
+    id: 'user-superadmin-beavers',
     email: 'beaverstraining@gmail.com',
     role: 'superadmin',
   });
   assert(
-    verifyLegacyEmail.authorized === false,
-    'E-mail antigo não deve mais conceder acesso automático ao painel global'
+    verifyBeaversAdmin.authorized === true && verifyBeaversAdmin.reason === 'authorized',
+    'beaverstraining@gmail.com possui acesso administrativo global autorizado'
   );
-  console.log('   ✅ [Caso D] Usuários sem autorização global bloqueados (403).');
+  console.log('   ✅ [Caso D] Usuários sem autorização global bloqueados (403) e beaverstraining@gmail.com autorizado.');
 
   // --------------------------------------------------------------------------
   // CASO E — Verificação estrutural das Migrations 25 e 26

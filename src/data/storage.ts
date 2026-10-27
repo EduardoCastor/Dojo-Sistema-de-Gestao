@@ -155,6 +155,18 @@ export class DataStore {
         active: true,
       });
     }
+    if (!normalized.some(u => u.email.toLowerCase() === 'beaverstraining@gmail.com' && u.role === 'superadmin')) {
+      changed = true;
+      normalized.push({
+        id: 'user-superadmin-beavers',
+        tenantId: 'platform',
+        name: 'Administrador Global Tatame Club',
+        email: 'beaverstraining@gmail.com',
+        role: 'superadmin',
+        phone: '(11) 99999-0001',
+        active: true,
+      });
+    }
     if (changed) {
       save('users', normalized);
     }
@@ -167,12 +179,14 @@ export class DataStore {
 
   static getPlatformBootstrapState(): {
     bootstrapped: boolean;
+    bootstrappedEmails?: string[];
     ownerEmail: string;
     bootstrappedAt?: string;
     setupTokenHash?: string;
   } {
     return load('platform_bootstrap_state', {
       bootstrapped: false,
+      bootstrappedEmails: [],
       ownerEmail: 'admin@tatameclub.com.br',
       setupTokenHash: 'TATAME-CLUB-OWNER-BOOTSTRAP-2026',
     });
@@ -180,6 +194,7 @@ export class DataStore {
 
   static savePlatformBootstrapState(state: {
     bootstrapped: boolean;
+    bootstrappedEmails?: string[];
     ownerEmail: string;
     bootstrappedAt?: string;
     setupTokenHash?: string;

@@ -7,52 +7,74 @@
  * - E-mail oficial do proprietário global: admin@tatameclub.com.br
  */
 
+export const AUTHORIZED_GLOBAL_ADMIN_EMAILS = [
+  'admin@tatameclub.com.br',
+  'beaverstraining@gmail.com',
+] as const;
+
 export const DEFAULT_PLATFORM_OWNER_EMAIL = 'admin@tatameclub.com.br';
+export const SECONDARY_PLATFORM_OWNER_EMAIL = 'beaverstraining@gmail.com';
 export const LEGACY_PLATFORM_OWNER_EMAIL = 'beaverstraining@gmail.com';
 
-function resolveEnvPlatformOwnerEmail(): string {
+function resolveAuthorizedOwnerEmails(): string[] {
+  const baseList: string[] = ['admin@tatameclub.com.br', 'beaverstraining@gmail.com'];
   try {
-    if (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_PLATFORM_OWNER_EMAIL) {
-      const envVal = String((import.meta as any).env.VITE_PLATFORM_OWNER_EMAIL).trim().toLowerCase();
-      if (envVal && envVal.includes('@')) {
-        return envVal;
-      }
-    }
-    if (typeof process !== 'undefined' && process.env?.VITE_PLATFORM_OWNER_EMAIL) {
-      const envVal = String(process.env.VITE_PLATFORM_OWNER_EMAIL).trim().toLowerCase();
-      if (envVal && envVal.includes('@')) {
-        return envVal;
+    const envSources = [
+      typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_PLATFORM_OWNER_EMAIL : undefined,
+      typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_PLATFORM_OWNER_EMAILS : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_PLATFORM_OWNER_EMAIL : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_PLATFORM_OWNER_EMAILS : undefined,
+    ];
+    for (const raw of envSources) {
+      if (raw && typeof raw === 'string') {
+        const parts = raw.split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(s => s.includes('@'));
+        for (const p of parts) {
+          if (!baseList.includes(p)) {
+            baseList.push(p);
+          }
+        }
       }
     }
   } catch {
     // ignore environment access errors
   }
-  return DEFAULT_PLATFORM_OWNER_EMAIL;
+  return baseList;
 }
 
-const resolvedOwnerEmail = resolveEnvPlatformOwnerEmail();
+const resolvedOwnerEmails = resolveAuthorizedOwnerEmails();
 
 export const OFFICIAL_DOMAINS = {
   MAIN_SITE: 'tatameclub.com.br',
   MAIN_SITE_URL: 'https://tatameclub.com.br',
   SAAS_ADMIN_PANEL: 'painel.tatameclub.com.br',
   SAAS_ADMIN_PANEL_URL: 'https://painel.tatameclub.com.br',
-  PLATFORM_OWNER_EMAIL: resolvedOwnerEmail,
+  PLATFORM_OWNER_EMAIL: DEFAULT_PLATFORM_OWNER_EMAIL,
+  PLATFORM_OWNER_EMAILS: resolvedOwnerEmails,
+  PLATFORM_OWNER_DISPLAY: 'admin@tatameclub.com.br • beaverstraining@gmail.com',
   // CamelCase aliases for UI convenience
   mainSiteHost: 'tatameclub.com.br',
   mainSiteUrl: 'https://tatameclub.com.br',
   saasAdminHost: 'painel.tatameclub.com.br',
   saasAdminUrl: 'https://painel.tatameclub.com.br',
-  platformOwnerEmail: resolvedOwnerEmail,
+  platformOwnerEmail: DEFAULT_PLATFORM_OWNER_EMAIL,
+  platformOwnerEmails: resolvedOwnerEmails,
+  platformOwnerDisplay: 'admin@tatameclub.com.br • beaverstraining@gmail.com',
 } as const;
 
 export type AppEnvironmentMode = 'main_site' | 'saas_admin_panel';
 
 /**
- * Retorna o e-mail oficial configurado para o proprietário global do SaaS.
+ * Retorna os e-mails oficiais autorizados para administrar a plataforma globalmente.
+ */
+export function getAuthorizedPlatformOwnerEmails(): string[] {
+  return resolveAuthorizedOwnerEmails();
+}
+
+/**
+ * Retorna o e-mail oficial principal configurado para o proprietário global do SaaS.
  */
 export function getAuthorizedPlatformOwnerEmail(): string {
-  return resolveEnvPlatformOwnerEmail();
+  return DEFAULT_PLATFORM_OWNER_EMAIL;
 }
 
 /**
@@ -122,7 +144,8 @@ export function detectEnvironmentMode(
  */
 export function isAuthorizedPlatformOwnerEmail(email?: string | null): boolean {
   if (!email) return false;
-  return email.trim().toLowerCase() === getAuthorizedPlatformOwnerEmail();
+  const normalized = email.trim().toLowerCase();
+  return getAuthorizedPlatformOwnerEmails().includes(normalized);
 }
 
 /**

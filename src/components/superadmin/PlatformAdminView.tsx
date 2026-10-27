@@ -385,7 +385,9 @@ export const PlatformAdminView: React.FC<PlatformAdminViewProps> = ({
               Console Central da Plataforma
             </span>
             <span className="text-xs text-slate-400">·</span>
-            <span className="text-xs text-slate-400">Administrador Global SaaS</span>
+            <span className="text-xs text-slate-300 font-mono">
+              Admin Conectado: <strong className="text-amber-300">{currentUser.email}</strong>
+            </span>
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             Tatame Club · Painel Global do Proprietário SaaS

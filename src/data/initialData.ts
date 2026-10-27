@@ -263,6 +263,15 @@ export const INITIAL_USERS: User[] = [
     active: true,
   },
   {
+    id: 'user-superadmin-beavers',
+    tenantId: 'platform',
+    name: 'Administrador Global Tatame Club',
+    email: 'beaverstraining@gmail.com',
+    role: 'superadmin',
+    phone: '(11) 99999-0001',
+    active: true,
+  },
+  {
     id: 'user-owner',
     tenantId: 'tenant-kodokan',
     branchId: 'branch-matriz',
