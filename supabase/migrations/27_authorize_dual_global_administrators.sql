@@ -241,7 +241,8 @@ AS $$
 $$;
 
 -- 5. ATUALIZAR public.get_platform_bootstrap_status()
-CREATE OR REPLACE FUNCTION public.get_platform_bootstrap_status(p_email text DEFAULT NULL)
+-- 5.1 Versão sem argumentos (compatível com Migration 26, sem ambiguidades)
+CREATE OR REPLACE FUNCTION public.get_platform_bootstrap_status()
 RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
@@ -249,14 +250,13 @@ SECURITY DEFINER
 SET search_path = public, auth
 AS $$
 DECLARE
-  v_normalized_email text := lower(trim(coalesce(p_email, '')));
+  v_authorized_emails text[];
+  v_admin_bootstrapped boolean := false;
+  v_beavers_bootstrapped boolean := false;
+  v_any_bootstrapped boolean := false;
   v_account_exists boolean := false;
   v_email_confirmed boolean := false;
-  v_bootstrap_completed boolean := false;
-  v_authorized_emails text[];
-  v_target_email text;
 BEGIN
-  -- Coletar e-mails autorizados ativos
   SELECT array_agg(email ORDER BY (CASE WHEN email = 'admin@tatameclub.com.br' THEN 0 WHEN email = 'beaverstraining@gmail.com' THEN 1 ELSE 2 END), email)
   INTO v_authorized_emails
   FROM public.platform_authorized_owners
@@ -266,10 +266,63 @@ BEGIN
     v_authorized_emails := ARRAY['admin@tatameclub.com.br', 'beaverstraining@gmail.com'];
   END IF;
 
-  IF v_normalized_email <> '' AND v_normalized_email = ANY(v_authorized_emails) THEN
-    v_target_email := v_normalized_email;
-  ELSE
-    v_target_email := v_authorized_emails[1];
+  SELECT
+    EXISTS (SELECT 1 FROM auth.users WHERE lower(email) = 'admin@tatameclub.com.br'),
+    EXISTS (SELECT 1 FROM auth.users WHERE lower(email) = 'admin@tatameclub.com.br' AND email_confirmed_at IS NOT NULL),
+    EXISTS (
+      SELECT 1 FROM auth.users u
+      JOIN public.profiles p ON p.id = u.id
+      WHERE lower(u.email) = 'admin@tatameclub.com.br' AND p.is_platform_admin = true AND u.email_confirmed_at IS NOT NULL
+    )
+  INTO v_account_exists, v_email_confirmed, v_admin_bootstrapped;
+
+  SELECT EXISTS (
+    SELECT 1 FROM auth.users u
+    JOIN public.profiles p ON p.id = u.id
+    WHERE lower(u.email) = 'beaverstraining@gmail.com' AND p.is_platform_admin = true AND u.email_confirmed_at IS NOT NULL
+  ) INTO v_beavers_bootstrapped;
+
+  v_any_bootstrapped := (v_admin_bootstrapped OR v_beavers_bootstrapped);
+
+  RETURN jsonb_build_object(
+    'migration_25_applied', true,
+    'migration_26_applied', true,
+    'migration_27_applied', true,
+    'authorized_owner_email', 'admin@tatameclub.com.br',
+    'authorized_emails', v_authorized_emails,
+    'account_exists', COALESCE(v_account_exists, false),
+    'email_confirmed', COALESCE(v_email_confirmed, false),
+    'bootstrap_completed', COALESCE(v_any_bootstrapped, false),
+    'admin_bootstrapped', v_admin_bootstrapped,
+    'beavers_bootstrapped', v_beavers_bootstrapped
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_platform_bootstrap_status() TO anon, authenticated, service_role;
+
+-- 5.2 Versão parametrizada por e-mail (sem default, garantindo unicidade na resolução de sobrecarga)
+CREATE OR REPLACE FUNCTION public.get_platform_bootstrap_status(p_email text)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_normalized_email text := lower(trim(coalesce(p_email, 'admin@tatameclub.com.br')));
+  v_account_exists boolean := false;
+  v_email_confirmed boolean := false;
+  v_bootstrap_completed boolean := false;
+  v_authorized_emails text[];
+BEGIN
+  SELECT array_agg(email ORDER BY (CASE WHEN email = 'admin@tatameclub.com.br' THEN 0 WHEN email = 'beaverstraining@gmail.com' THEN 1 ELSE 2 END), email)
+  INTO v_authorized_emails
+  FROM public.platform_authorized_owners
+  WHERE active = true;
+
+  IF v_authorized_emails IS NULL OR array_length(v_authorized_emails, 1) = 0 THEN
+    v_authorized_emails := ARRAY['admin@tatameclub.com.br', 'beaverstraining@gmail.com'];
   END IF;
 
   SELECT
@@ -279,14 +332,14 @@ BEGIN
   INTO v_account_exists, v_email_confirmed, v_bootstrap_completed
   FROM auth.users u
   LEFT JOIN public.profiles p ON p.id = u.id
-  WHERE lower(u.email) = v_target_email
+  WHERE lower(u.email) = v_normalized_email
   LIMIT 1;
 
   RETURN jsonb_build_object(
     'migration_25_applied', true,
     'migration_26_applied', true,
     'migration_27_applied', true,
-    'authorized_owner_email', v_target_email,
+    'authorized_owner_email', v_normalized_email,
     'authorized_emails', v_authorized_emails,
     'account_exists', COALESCE(v_account_exists, false),
     'email_confirmed', COALESCE(v_email_confirmed, false),
@@ -382,8 +435,10 @@ REVOKE EXECUTE ON FUNCTION public.verify_platform_admin_access() FROM PUBLIC, an
 GRANT EXECUTE ON FUNCTION public.verify_platform_admin_access() TO authenticated, service_role;
 
 -- 7. ATUALIZAR public.bootstrap_platform_owner_by_email() PARA AMBOS OS E-MAILS
+-- IMPORTANTE: Preserva os valores padrão (DEFAULT 'admin@tatameclub.com.br') definidos nas Migrations 25 e 26,
+-- evitando o erro PostgreSQL 42P13 ("cannot remove parameter defaults from existing function").
 CREATE OR REPLACE FUNCTION public.bootstrap_platform_owner_by_email(
-  p_email text,
+  p_email text DEFAULT 'admin@tatameclub.com.br',
   p_reason text DEFAULT 'Bootstrap do administrador da plataforma Tatame Club'
 )
 RETURNS jsonb
@@ -396,8 +451,11 @@ DECLARE
   v_owner_config record;
   v_has_existing_admin boolean := false;
   v_jwt_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
-  v_caller_role text := coalesce(current_setting('role', true), current_user);
-  v_is_privileged_context boolean := v_caller_role IN ('service_role', 'postgres', 'supabase_admin');
+  v_caller_role text := lower(coalesce(nullif(current_setting('role', true), ''), current_user, session_user, ''));
+  v_is_privileged_context boolean := v_caller_role IN ('service_role', 'postgres', 'supabase_admin', 'dashboard_user', 'authenticator')
+    OR current_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+    OR session_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+    OR coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role';
   v_normalized_email text := lower(trim(coalesce(p_email, 'admin@tatameclub.com.br')));
   v_is_known_owner boolean := false;
 BEGIN
