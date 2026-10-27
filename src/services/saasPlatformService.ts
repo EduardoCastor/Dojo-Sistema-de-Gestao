@@ -551,7 +551,7 @@ export const saasPlatformService = {
             (u) => u.active && u.role !== 'superadmin' && u.role !== 'student' && u.role !== 'guardian'
           ).length;
 
-    const effectivePlanId = subscription?.planId || tenant.planId || 'trial';
+    const effectivePlanId = subscription?.planId || tenant?.planId || 'trial';
     const effectiveMaxStudents =
       subscription?.customMaxStudents ??
       plan?.maxStudents ??
@@ -635,7 +635,9 @@ export const saasPlatformService = {
     }
 
     // 3. Assinatura comercial explicitamente ATIVA (prioridade sobre data histórica de trial expirada!)
-    const isCommercialPlan = tenant.planId !== 'trial' || (subscription?.planId && subscription.planId !== 'trial');
+    const isCommercialPlan =
+      (tenant?.planId && tenant.planId !== 'trial') ||
+      (subscription?.planId && subscription.planId !== 'trial');
     if (tenant.status === 'active' && (!subscription || subscription.status === 'active') && isCommercialPlan) {
       return {
         isAllowed: true,
@@ -798,7 +800,7 @@ export const saasPlatformService = {
       tenant.status === 'expired' ||
       subscription?.status === 'trial' ||
       subscription?.status === 'expired' ||
-      tenant.planId === 'trial'
+      tenant?.planId === 'trial'
     ) {
       const trialExpiry = new Date(subscription?.trialExpiresAt || tenant.trialExpiresAt).getTime();
       const now = Date.now();

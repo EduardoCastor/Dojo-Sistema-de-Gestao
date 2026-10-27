@@ -24,7 +24,7 @@ import { DataStore } from '../../data/storage';
 interface PlanUpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  tenant: Tenant;
+  tenant?: Tenant | null;
   onConfirmUpgrade: (newPlanId: SaaSPlanId, requestResult?: PlanSubscriptionRequestResult) => void;
 }
 
@@ -35,11 +35,12 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
   onConfirmUpgrade,
 }) => {
   const [plans, setPlans] = useState<SaaSCommercialPlan[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState<SaaSPlanId>(
-    tenant.planId === 'trial' ? 'advanced' : tenant.planId
-  );
+  const [selectedPlanId, setSelectedPlanId] = useState<SaaSPlanId>(() => {
+    if (!tenant?.planId || tenant.planId === 'trial') return 'advanced';
+    return tenant.planId;
+  });
   const [selectedCycle, setSelectedCycle] = useState<BillingCycle>('monthly');
-  const [recipientEmail, setRecipientEmail] = useState<string>(tenant.email || '');
+  const [recipientEmail, setRecipientEmail] = useState<string>(tenant?.email || '');
   const [submitting, setSubmitting] = useState(false);
   const [resendingEmail, setResendingEmail] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -49,7 +50,7 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
   const pixConfig = saasPlatformService.getCentralizedPixConfig();
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && tenant) {
       const commercialPlans = DataStore.getCommercialPlans().filter(
         (p) => p.id !== 'trial' && p.active !== false
       );
@@ -58,10 +59,10 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
       setErrorMsg(null);
 
       // Load any existing pending subscription request so the user sees its current status
-      const existingSub = DataStore.getSaaSSubscriptions(tenant.id)[0];
+      const existingSub = tenant.id ? DataStore.getSaaSSubscriptions(tenant.id)[0] : null;
       if (existingSub?.requestedPlanId && existingSub.requestedPlanId !== 'trial') {
         setSelectedPlanId(existingSub.requestedPlanId as SaaSPlanId);
-      } else if (tenant.planId !== 'trial') {
+      } else if (tenant.planId && tenant.planId !== 'trial') {
         setSelectedPlanId(tenant.planId);
       } else {
         setSelectedPlanId('advanced');
@@ -70,9 +71,9 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
         setSelectedCycle(existingSub.requestedBillingCycle);
       }
     }
-  }, [isOpen, tenant.id, tenant.email, tenant.planId]);
+  }, [isOpen, tenant?.id, tenant?.email, tenant?.planId]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !tenant) return null;
 
   const selectedPlan =
     plans.find((p) => p.id === selectedPlanId) ||

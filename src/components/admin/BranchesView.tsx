@@ -26,7 +26,7 @@ export const BranchesView: React.FC<BranchesViewProps> = ({
   const [managerName, setManagerName] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const currentPlan = plans.find((p) => p.id === tenant.planId) || plans[0];
+  const currentPlan = plans.find((p) => p.id === tenant?.planId) || plans[0];
   const limits = useMemo(() => saasPlatformService.getEffectiveLimits(tenant.id), [tenant.id, branches]);
   const maxBranchesAllowed = limits.maxBranches;
   const canAddBranch = branches.length < maxBranchesAllowed;

@@ -308,7 +308,7 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Limite de Usuários da Licença ({tenant.planId.toUpperCase()})
+                Limite de Usuários da Licença ({(tenant?.planId || 'PLANO').toUpperCase()})
               </span>
               {limits.hasCustomLimits && (
                 <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-semibold">

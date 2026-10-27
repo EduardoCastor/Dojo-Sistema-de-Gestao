@@ -96,7 +96,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         if (
           synced.tenant &&
           onTenantSynchronized &&
-          (synced.tenant.status !== tenant.status || synced.tenant.planId !== tenant.planId)
+          (synced.tenant.status !== tenant?.status || synced.tenant.planId !== tenant?.planId)
         ) {
           onTenantSynchronized(synced.tenant);
         }
@@ -115,7 +115,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const subscription = subscriptions.find((s) => s.tenantId === tenant.id) || null;
   const commercialPlans = DataStore.getCommercialPlans();
   const currentCommercialPlan =
-    commercialPlans.find((p) => p.id === (subscription?.planId || tenant.planId)) || null;
+    commercialPlans.find((p) => p.id === (subscription?.planId || tenant?.planId)) || null;
   const currentStudents = DataStore.getStudents(tenant.id);
 
   const accessEvaluation = saasPlatformService.evaluateTenantAccess(
@@ -329,7 +329,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             {tenant.status === 'active' && currentUser.role !== 'superadmin' && (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Plano {currentCommercialPlan?.name || tenant.planId.toUpperCase()}</span>
+                <span>Plano {currentCommercialPlan?.name || (tenant?.planId ? tenant.planId.toUpperCase() : 'ATIVO')}</span>
               </div>
             )}
           </div>

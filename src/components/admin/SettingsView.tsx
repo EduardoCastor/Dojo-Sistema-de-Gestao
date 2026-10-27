@@ -83,7 +83,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setDailyInterestRate(tenant.settings?.dailyInterestRate ?? 0.033);
   }, [tenant]);
 
-  const currentPlan = plans.find((p) => p.id === tenant.planId) || plans[0];
+  const currentPlan = plans.find((p) => p.id === tenant?.planId) || plans[0];
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

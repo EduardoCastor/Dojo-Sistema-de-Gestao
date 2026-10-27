@@ -1916,13 +1916,14 @@ export default function App() {
         />
       )}
 
-      <PlanUpgradeModal
-        isOpen={isUpgradePlanOpen}
-        onClose={() => setIsUpgradePlanOpen(false)}
-        plans={plans}
-        currentPlanId={activeTenant.planId}
-        onConfirmUpgrade={handleConfirmUpgrade}
-      />
+      {isUpgradePlanOpen && (
+        <PlanUpgradeModal
+          isOpen={isUpgradePlanOpen}
+          onClose={() => setIsUpgradePlanOpen(false)}
+          tenant={activeTenant}
+          onConfirmUpgrade={handleConfirmUpgrade}
+        />
+      )}
     </div>
   );
 }
