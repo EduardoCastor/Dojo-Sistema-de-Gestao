@@ -87,3 +87,18 @@ O retorno esperado é um JSON com `"migration_25_applied": true`, `"migration_26
 ### Procedimento B — Via Edge Function Protegida (`platform-owner-bootstrap`) com Token Único
 1. Publique a Edge Function `supabase/functions/platform-owner-bootstrap/index.ts` e configure o segredo `PLATFORM_BOOTSTRAP_SECRET` em `Edge Functions -> Secrets` no Supabase.
 2. Em `https://painel.tatameclub.com.br`, selecione **"1º Acesso"** → **"Token Administrativo"**, informe o `PLATFORM_BOOTSTRAP_SECRET` e escolha sua senha forte.
+
+---
+
+## 7. Aplicação da Migration 30 (Solicitação de Planos, Pix e Assinaturas SaaS)
+
+Para que o botão **"Solicitar Plano e Receber Chave Pix"** registre com sucesso as assinaturas no banco de dados e notifique o schema cache do PostgREST sem o erro `PGRST202`:
+
+1. No **SQL Editor** do Supabase (`https://supabase.com/dashboard/project/knmzzndugadmklzzgtaa/sql/new`):
+2. Abra e execute integralmente o arquivo `supabase/migrations/30_fix_saas_pix_subscription_and_rpcs.sql`.
+3. Ele criará/atualizará:
+   - As colunas de planos, faturas e auditoria de e-mails (`saas_subscription_email_logs`).
+   - As constraints de status para `pending_payment` e `under_review`.
+   - A RPC `public.request_saas_plan_subscription(...)` com `SECURITY DEFINER` e permissão para `authenticated`.
+   - O comando `NOTIFY pgrst, 'reload schema';` para atualizar instantaneamente o cache de RPCs do Supabase.
+

@@ -668,7 +668,11 @@ export const saasPlatformService = {
       const nowMs = Date.now();
       const diffMs = trialExpiryMs - nowMs;
       const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      const isTrialStillValid = !Number.isNaN(trialExpiryMs) && daysLeft >= 0;
+      const isTrialStillValid =
+        tenant.status !== 'expired' &&
+        subscription?.status !== 'expired' &&
+        !Number.isNaN(trialExpiryMs) &&
+        daysLeft > 0;
 
       if (isTrialStillValid) {
         return {
@@ -1038,15 +1042,86 @@ export const saasPlatformService = {
       });
 
       if (rpcErr) {
+        if (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('schema cache')) {
+          throw new Error(
+            `A função 'request_saas_plan_subscription' precisa ser aplicada no Supabase via Migration 30 (ou o schema cache precisa ser recarregado com NOTIFY pgrst, 'reload schema';). Detalhes: ${rpcErr.message}`
+          );
+        }
         throw new Error(`Falha ao registrar solicitação de plano no banco de dados: ${rpcErr.message}`);
       }
 
       if (rpcData) {
         reusedExistingPayment = Boolean(rpcData.reused_existing_payment);
-        const synced = await this.syncTenantSubscriptionState(params.tenantId);
-        if (synced.tenant) tenant = synced.tenant;
-        if (synced.subscription) subscription = synced.subscription;
-        payment = synced.payments.find((p) => p.id === rpcData.payment_id) || synced.payments[0];
+        try {
+          const synced = await this.syncTenantSubscriptionState(params.tenantId);
+          if (synced.tenant) tenant = synced.tenant;
+          if (synced.subscription) subscription = synced.subscription;
+          payment = synced.payments.find((p) => p.id === rpcData.payment_id) || synced.payments[0];
+        } catch (syncErr) {
+          console.warn('Aviso ao sincronizar estado após RPC:', syncErr);
+        }
+
+        // Se o pagamento ainda não foi refletido na sincronização, constrói a partir dos dados confirmados pelo banco
+        if (!payment && rpcData.payment_id) {
+          const nowIso = new Date().toISOString();
+          const dueIso = rpcData.due_date || new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          const periodEndIso = new Date(Date.now() + pricing.months * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+          payment = {
+            id: rpcData.payment_id,
+            subscriptionId: rpcData.subscription_id,
+            tenantId: params.tenantId,
+            tenantName: tenant.tradeName,
+            planId: rpcData.plan_id || selectedPlan.id,
+            planName: rpcData.plan_name || selectedPlan.name,
+            billingCycle: (rpcData.billing_cycle || billingCycle) as BillingCycle,
+            amount: Number(rpcData.amount || pricing.totalAmount),
+            currency: 'BRL',
+            dueDate: dueIso,
+            status: 'pending',
+            paymentMethod: 'pix',
+            payerEmail: rpcData.payer_email || recipientEmail,
+            pixKey: rpcData.pix_key || pixConfig.pixKey,
+            pixKeyProvisional: pixConfig.isProvisional,
+            referenceId: rpcData.reference_id || `TC-${params.tenantId.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+            billingPeriodStart: nowIso.split('T')[0],
+            billingPeriodEnd: periodEndIso,
+            pixCopyPaste: rpcData.pix_key || pixConfig.pixKey,
+            notes: `Solicitação de contratação do ${selectedPlan.name} (${pricing.billingCycleLabel}) via Pix.`,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          };
+          DataStore.saveSaaSPayment(payment);
+        }
+
+        if (!subscription && rpcData.subscription_id) {
+          const nowIso = new Date().toISOString();
+          const periodEndIso = new Date(Date.now() + pricing.months * 30 * 24 * 60 * 60 * 1000).toISOString();
+          const newSub: SaaSSubscription = {
+            id: rpcData.subscription_id,
+            tenantId: params.tenantId,
+            tenantName: tenant.tradeName,
+            planId: selectedPlan.id,
+            planName: selectedPlan.name,
+            requestedPlanId: selectedPlan.id,
+            requestedBillingCycle: billingCycle,
+            requestedAmount: pricing.totalAmount,
+            status: (rpcData.subscription_status || 'pending_payment') as SaaSSubscription['status'],
+            billingCycle,
+            amount: pricing.totalAmount,
+            startedAt: tenant.trialStartedAt || nowIso,
+            currentPeriodStart: nowIso,
+            currentPeriodEnd: periodEndIso,
+            nextDueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            trialExpiresAt: tenant.trialExpiresAt,
+            gracePeriodDays: 5,
+            notes: `Solicitação de contratação do plano ${selectedPlan.name} via Pix.`,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          };
+          subscription = newSub;
+          DataStore.saveSaaSSubscription(newSub);
+        }
       }
     }
 
