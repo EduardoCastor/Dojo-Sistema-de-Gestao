@@ -90,6 +90,25 @@ export const INITIAL_SAAS_PLANS: SaaSPlan[] = [
       automatedNotifications: true,
     },
   },
+  {
+    id: 'enterprise',
+    name: 'Plano Franquias & Federações',
+    tagline: 'Para redes com mais de 5 filiais, gestão centralizada com relatórios consolidados e limites ampliados.',
+    pricePerMonth: 599,
+    trialDays: 0,
+    maxStudents: 2000,
+    maxBranches: 20,
+    maxUsers: 100,
+    maxStorageGb: 200,
+    features: {
+      digitalLibrary: true,
+      beltExams: true,
+      competitions: true,
+      advancedReports: true,
+      multiBranch: true,
+      automatedNotifications: true,
+    },
+  },
 ];
 
 export const INITIAL_TENANTS: Tenant[] = [

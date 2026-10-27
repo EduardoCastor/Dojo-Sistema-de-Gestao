@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -58,6 +58,7 @@ interface DashboardLayoutProps {
   onLogout: () => void;
   onUpgradePlan: () => void;
   onNavigateToSuperAdmin?: () => void;
+  onTenantSynchronized?: (tenant: Tenant) => void;
   children: React.ReactNode;
 }
 
@@ -72,15 +73,49 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onLogout,
   onUpgradePlan,
   onNavigateToSuperAdmin,
+  onTenantSynchronized,
   children,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [, setSyncTick] = useState(0);
+
+  const handleRefreshLicenseStatus = useCallback(async () => {
+    const synced = await saasPlatformService.syncTenantSubscriptionState(tenant.id);
+    if (synced.tenant && onTenantSynchronized) {
+      onTenantSynchronized(synced.tenant);
+    }
+    setSyncTick((prev) => prev + 1);
+  }, [tenant.id, onTenantSynchronized]);
+
+  useEffect(() => {
+    let mounted = true;
+    saasPlatformService
+      .syncTenantSubscriptionState(tenant.id)
+      .then((synced) => {
+        if (!mounted) return;
+        if (
+          synced.tenant &&
+          onTenantSynchronized &&
+          (synced.tenant.status !== tenant.status || synced.tenant.planId !== tenant.planId)
+        ) {
+          onTenantSynchronized(synced.tenant);
+        }
+        setSyncTick((prev) => prev + 1);
+      })
+      .catch(() => {
+        // fallback local preservado
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [tenant.id]);
 
   // SaaS Subscription & Access Evaluation
   const subscriptions = DataStore.getSaaSSubscriptions();
-  const subscription = subscriptions.find(s => s.tenantId === tenant.id) || null;
+  const subscription = subscriptions.find((s) => s.tenantId === tenant.id) || null;
   const commercialPlans = DataStore.getCommercialPlans();
-  const currentCommercialPlan = commercialPlans.find(p => p.id === tenant.planId) || null;
+  const currentCommercialPlan =
+    commercialPlans.find((p) => p.id === (subscription?.planId || tenant.planId)) || null;
   const currentStudents = DataStore.getStudents(tenant.id);
 
   const accessEvaluation = saasPlatformService.evaluateTenantAccess(
@@ -93,7 +128,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
   // Calculate trial days left
   const calculateDaysLeft = () => {
-    if (tenant.status !== 'trial' || !tenant.trialExpiresAt) return null;
+    if (accessEvaluation.accessState !== 'trial') return null;
+    if (accessEvaluation.daysRemaining !== undefined) return accessEvaluation.daysRemaining;
+    if (!tenant.trialExpiresAt) return null;
     const expiry = new Date(tenant.trialExpiresAt).getTime();
     const now = new Date().getTime();
     const diffDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
@@ -300,14 +337,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
         {/* Viewport content */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-950">
-          {/* 1. Bloqueio de Acesso se Não Autorizado (Suspensa, Expirada ou Inadimplente fora da carência) */}
+          {/* 1. Bloqueio de Acesso se Não Autorizado (Suspensa, Expirada, Pagamento Pendente após Trial ou Inadimplente fora da carência) */}
           {!accessEvaluation.isAllowed && currentUser.role !== 'superadmin' ? (
             <TenantAccessRestrictedView
               tenant={tenant}
-              accessState={accessEvaluation.accessState as any}
-              message={accessEvaluation.message}
+              evaluation={accessEvaluation}
               subscription={subscription}
-              plans={commercialPlans}
+              plan={currentCommercialPlan}
+              onLogout={onLogout}
+              onRefreshStatus={handleRefreshLicenseStatus}
               onOpenUpgradeModal={onUpgradePlan}
             />
           ) : (

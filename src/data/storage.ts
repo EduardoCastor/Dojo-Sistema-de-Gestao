@@ -29,6 +29,7 @@ import {
   SaaSCommercialPlan,
   SaaSSubscription,
   SaaSPayment,
+  SaaSSubscriptionEmailLog,
   PlatformAuditLog,
   TenantUserInvitation,
 } from '../types';
@@ -704,8 +705,32 @@ export class DataStore {
     }
   }
 
+  static getSaaSEmailLogs(tenantId?: string): SaaSSubscriptionEmailLog[] {
+    const all = load<SaaSSubscriptionEmailLog[]>('saas_email_logs', []);
+    return tenantId ? all.filter(l => l.tenantId === tenantId) : all;
+  }
+
+  static saveSaaSEmailLogs(logs: SaaSSubscriptionEmailLog[]): void {
+    save('saas_email_logs', logs);
+  }
+
+  static saveSaaSEmailLog(log: SaaSSubscriptionEmailLog): void {
+    const all = load<SaaSSubscriptionEmailLog[]>('saas_email_logs', []);
+    const index = all.findIndex(l => l.id === log.id);
+    if (index >= 0) {
+      all[index] = log;
+      save('saas_email_logs', [...all]);
+    } else {
+      save('saas_email_logs', [log, ...all]);
+    }
+  }
+
   static getPlatformAuditLogs(): PlatformAuditLog[] {
     return load('platform_audit_logs', INITIAL_PLATFORM_AUDIT_LOGS);
+  }
+
+  static savePlatformAuditLogs(logs: PlatformAuditLog[]): void {
+    save('platform_audit_logs', logs);
   }
 
   static logPlatformAudit(

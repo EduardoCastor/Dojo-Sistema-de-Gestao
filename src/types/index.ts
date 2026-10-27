@@ -1,4 +1,4 @@
-export type SaaSPlanId = 'trial' | 'basic' | 'advanced';
+export type SaaSPlanId = 'trial' | 'basic' | 'advanced' | 'enterprise';
 
 export type UserRole = 
   | 'superadmin' 
@@ -53,7 +53,10 @@ export interface Tenant {
     zip?: string;
   };
   planId: SaaSPlanId;
-  status: 'trial' | 'active' | 'suspended' | 'canceled';
+  status: 'trial' | 'active' | 'suspended' | 'canceled' | 'expired';
+  suspendedAt?: string;
+  suspendedReason?: string;
+  updatedAt?: string;
   trialStartedAt: string;
   trialExpiresAt: string;
   createdAt: string;
@@ -785,20 +788,24 @@ export interface AuditLog {
 export type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
 
 export type SaaSSubscriptionStatus =
-  | 'trial'             // Em período de teste (10 dias)
-  | 'waiting_payment'   // Aguardando confirmação do primeiro pagamento ou renovação
-  | 'active'            // Assinatura regular e em dia
-  | 'past_due'          // Pagamento atrasado (dentro ou fora do período de tolerância)
-  | 'suspended'         // Suspensa administrativamente pelo operador da plataforma
-  | 'canceled'          // Cancelada pelo cliente ou por rescisão contratual
-  | 'expired';          // Período de teste ou vigência expirado sem renovação
+  | 'trial'               // Em período de degustação gratuita
+  | 'pending_payment'     // Contratação solicitada, aguardando confirmação de pagamento Pix
+  | 'waiting_payment'     // Aguardando confirmação do primeiro pagamento ou renovação
+  | 'payment_under_review'// Comprovante enviado e em análise administrativa
+  | 'active'              // Assinatura regular e em dia
+  | 'past_due'            // Pagamento atrasado (dentro ou fora do período de tolerância)
+  | 'suspended'           // Suspensa administrativamente pelo operador da plataforma
+  | 'canceled'            // Cancelada pelo cliente ou por rescisão contratual
+  | 'expired'             // Período de teste ou vigência expirado sem renovação
+  | 'rejected';           // Pagamento rejeitado ou inválido
 
 export interface SaaSCommercialPlan {
-  id: string; // ex: 'plan-basic', 'plan-advanced', 'plan-enterprise', 'trial'
+  id: string; // ex: 'basic', 'advanced', 'enterprise', 'trial'
   name: string;
   description: string;
   tagline?: string;
   price: number; // Preço base do ciclo mensal em BRL
+  annualPrice?: number;
   currency: 'BRL';
   billingCycle: BillingCycle;
   cycleMultiplier?: number; // Ex: 1 para mensal, 3 para trimestral, 12 para anual
@@ -806,6 +813,7 @@ export interface SaaSCommercialPlan {
   maxStudents: number;
   maxBranches: number;
   maxUsers: number;
+  maxClasses?: number;
   maxStorageGb: number;
   features: {
     digitalLibrary: boolean;
@@ -824,8 +832,18 @@ export interface SaaSCommercialPlan {
 export interface SaaSSubscription {
   id: string;
   tenantId: string;
+  tenantName?: string;
   planId: string;
   planName: string;
+  requestedPlanId?: string;
+  requestedBillingCycle?: BillingCycle;
+  requestedAmount?: number;
+  paymentRequestedAt?: string;
+  lastEmailSentAt?: string;
+  lastEmailStatus?: 'sent' | 'failed' | 'missing_config' | 'pending';
+  lastEmailError?: string;
+  lastPaymentConfirmedAt?: string;
+  lastPaymentConfirmedBy?: string;
   status: SaaSSubscriptionStatus;
   billingCycle: BillingCycle;
   amount: number;
@@ -845,6 +863,7 @@ export interface SaaSSubscription {
   suspendedReason?: string;
   suspendedAt?: string;
   lastPaymentId?: string;
+  notes?: string;
   manualActivation?: {
     activatedByUserId: string;
     activatedByUserName: string;
@@ -856,19 +875,37 @@ export interface SaaSSubscription {
   updatedAt: string;
 }
 
-export type SaaSPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded';
-export type SaaSPaymentMethod = 'pix' | 'credit_card' | 'boleto';
+export type SaaSPaymentStatus =
+  | 'pending'
+  | 'under_review'
+  | 'paid'
+  | 'failed'
+  | 'rejected'
+  | 'canceled'
+  | 'refunded';
+export type SaaSPaymentMethod = 'pix' | 'credit_card' | 'boleto' | 'manual';
 
 export interface SaaSPayment {
   id: string;
   subscriptionId: string;
   tenantId: string;
+  tenantName?: string;
+  planId?: string;
+  planName?: string;
+  billingCycle?: BillingCycle;
   amount: number;
   currency: 'BRL';
   dueDate: string;
   paidAt?: string;
   status: SaaSPaymentStatus;
   paymentMethod: SaaSPaymentMethod;
+  payerEmail?: string;
+  pixKey?: string;
+  pixKeyProvisional?: boolean;
+  referenceId?: string;
+  confirmedByUserId?: string;
+  confirmedByUserName?: string;
+  confirmationNotes?: string;
   gatewayChargeId?: string;
   gatewayPaymentId?: string;
   billingPeriodStart: string;
@@ -880,6 +917,27 @@ export interface SaaSPayment {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SaaSSubscriptionEmailLog {
+  id: string;
+  tenantId: string;
+  subscriptionId?: string;
+  paymentId?: string;
+  recipientEmail: string;
+  subject: string;
+  planId: string;
+  planName: string;
+  billingCycle: BillingCycle;
+  amount: number;
+  pixKeyUsed: string;
+  isProvisionalPixKey: boolean;
+  status: 'sent' | 'failed' | 'missing_config';
+  provider: string;
+  providerMessageId?: string;
+  errorMessage?: string;
+  triggeredByUserId?: string;
+  createdAt: string;
 }
 
 export interface SaaSPaymentWebhookEvent {
@@ -906,6 +964,11 @@ export interface PlatformAuditLog {
     | 'cancel_subscription'
     | 'manual_activate_subscription'
     | 'change_subscription_plan'
+    | 'change_tenant_plan'
+    | 'request_subscription_plan'
+    | 'confirm_saas_payment'
+    | 'reject_saas_payment'
+    | 'send_payment_email'
     | 'process_payment_webhook'
     | 'refund_payment'
     | 'register_tenant'
@@ -927,11 +990,14 @@ export interface TenantAccessEvaluation {
     | 'active'
     | 'trial'
     | 'trial_expired'
+    | 'pending_payment'
+    | 'waiting_payment'
+    | 'payment_under_review'
+    | 'rejected'
     | 'grace_period'
     | 'blocked_past_due'
     | 'blocked_suspended'
-    | 'blocked_canceled'
-    | 'waiting_payment';
+    | 'blocked_canceled';
   message: string;
   daysRemaining?: number;
   graceDaysLeft?: number;
