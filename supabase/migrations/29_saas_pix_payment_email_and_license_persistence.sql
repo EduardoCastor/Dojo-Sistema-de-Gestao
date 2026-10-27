@@ -324,6 +324,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_caller_id uuid := auth.uid();
+  v_caller_name text;
   v_tenant public.tenants%ROWTYPE;
   v_plan public.saas_commercial_plans%ROWTYPE;
   v_sub public.saas_subscriptions%ROWTYPE;
@@ -540,24 +541,24 @@ BEGIN
     RETURNING * INTO v_payment;
   END IF;
 
-  INSERT INTO public.audit_logs (tenant_id, actor_user_id, module, action, entity_type, entity_id, description, metadata)
-  VALUES (
+  INSERT INTO public.audit_logs (
+    tenant_id,
+    user_id,
+    user_name,
+    action,
+    entity,
+    entity_id,
+    details,
+    timestamp
+  ) VALUES (
     p_tenant_id,
     v_caller_id,
-    'saas_billing',
-    'request_subscription_plan',
-    'saas_subscription',
-    v_sub.id,
-    format('Solicitação de contratação do plano %s (%s) registrada no valor de R$ %s. Status: pending_payment.', v_plan.name, p_billing_cycle, v_total_amount),
-    jsonb_build_object(
-      'plan_id', v_plan.id,
-      'plan_name', v_plan.name,
-      'billing_cycle', p_billing_cycle,
-      'amount', v_total_amount,
-      'payment_id', v_payment.id,
-      'recipient_email', v_recipient_email,
-      'reused_existing_payment', v_reused_existing
-    )
+    COALESCE(auth.jwt() -> 'user_metadata' ->> 'full_name', auth.jwt() ->> 'email', 'Administrador'),
+    'Solicitação de Plano Comercial (Pix)',
+    'SaaSSubscription',
+    v_sub.id::text,
+    format('Solicitação de contratação do plano %s (%s) no valor de R$ %s via Pix. Status: pending_payment. Referência: %s.', v_plan.name, p_billing_cycle, v_total_amount, v_payment.reference_id),
+    now()
   );
 
   RETURN jsonb_build_object(

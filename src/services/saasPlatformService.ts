@@ -670,7 +670,6 @@ export const saasPlatformService = {
       const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
       const isTrialStillValid =
         tenant.status !== 'expired' &&
-        subscription?.status !== 'expired' &&
         !Number.isNaN(trialExpiryMs) &&
         daysLeft > 0;
 
@@ -1044,7 +1043,7 @@ export const saasPlatformService = {
       if (rpcErr) {
         if (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('schema cache')) {
           throw new Error(
-            `A função 'request_saas_plan_subscription' precisa ser aplicada no Supabase via Migration 30 (ou o schema cache precisa ser recarregado com NOTIFY pgrst, 'reload schema';). Detalhes: ${rpcErr.message}`
+            `A função 'request_saas_plan_subscription' precisa ser aplicada no Supabase via Migration 31 (ou o schema cache precisa ser recarregado com NOTIFY pgrst, 'reload schema';). Detalhes: ${rpcErr.message}`
           );
         }
         throw new Error(`Falha ao registrar solicitação de plano no banco de dados: ${rpcErr.message}`);
