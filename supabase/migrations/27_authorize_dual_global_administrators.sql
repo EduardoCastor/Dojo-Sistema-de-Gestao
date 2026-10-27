@@ -69,7 +69,102 @@ SET active = true,
     migrated_to = NULL,
     updated_at = now();
 
+-- 2.1 ATUALIZAR FUNÇÃO DE SEGURANÇA CONTRA ESCALONAMENTO INDEVIDO (COMPATÍVEL COM SQL EDITOR E BOOTSTRAP)
+-- Permite operações vindas do SQL Editor/Postgres/service_role E reconhece os proprietários legítimos ativos.
+CREATE OR REPLACE FUNCTION public.enforce_profile_admin_security()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_caller_role text := lower(coalesce(nullif(current_setting('role', true), ''), current_user, session_user, ''));
+  v_is_privileged boolean := false;
+  v_is_authorized_owner boolean := false;
+BEGIN
+  IF NEW.is_platform_admin IS DISTINCT FROM COALESCE(OLD.is_platform_admin, false) THEN
+    -- 1. Contexto privilegiado (SQL Editor, Migrations, Postgres superuser, service_role)
+    IF v_caller_role IN ('service_role', 'postgres', 'supabase_admin', 'dashboard_user', 'authenticator')
+       OR current_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR session_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role' THEN
+      v_is_privileged := true;
+    END IF;
+
+    -- 2. Verificar se o usuário que está recebendo a flag é um dos e-mails autorizados em platform_authorized_owners
+    IF NOT v_is_privileged THEN
+      SELECT EXISTS (
+        SELECT 1
+        FROM auth.users u
+        JOIN public.platform_authorized_owners o ON lower(trim(o.email)) = lower(trim(u.email))
+        WHERE u.id = NEW.id
+          AND o.active = true
+      ) INTO v_is_authorized_owner;
+
+      -- Fallback canônico
+      IF NOT v_is_authorized_owner THEN
+        SELECT EXISTS (
+          SELECT 1
+          FROM auth.users u
+          WHERE u.id = NEW.id
+            AND lower(trim(u.email)) IN ('admin@tatameclub.com.br', 'beaverstraining@gmail.com')
+        ) INTO v_is_authorized_owner;
+      END IF;
+    END IF;
+
+    -- 3. Se não for contexto privilegiado, nem proprietário autorizado ativo, nem platform_admin já validado:
+    IF NOT v_is_privileged AND NOT v_is_authorized_owner AND NOT public.is_platform_admin() THEN
+      RAISE EXCEPTION 'Violação de segurança: você não possui autorização para conceder ou alterar o papel de Administrador Global do SaaS.'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_platform_admin_flag ON public.profiles;
+CREATE TRIGGER trg_protect_platform_admin_flag
+BEFORE INSERT OR UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.enforce_profile_admin_security();
+
+-- 2.2 ATUALIZAR FUNÇÃO DE SEGURANÇA DE IMUTABILIDADE DE LICENÇAS
+CREATE OR REPLACE FUNCTION public.enforce_tenant_license_immutability()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_caller_role text := lower(coalesce(nullif(current_setting('role', true), ''), current_user, session_user, ''));
+  v_is_privileged boolean := false;
+BEGIN
+  IF (
+    NEW.plan_id IS DISTINCT FROM OLD.plan_id OR
+    NEW.status IS DISTINCT FROM OLD.status OR
+    NEW.trial_started_at IS DISTINCT FROM OLD.trial_started_at OR
+    NEW.trial_expires_at IS DISTINCT FROM OLD.trial_expires_at
+  ) THEN
+    IF v_caller_role IN ('service_role', 'postgres', 'supabase_admin', 'dashboard_user', 'authenticator')
+       OR current_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR session_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role' THEN
+      v_is_privileged := true;
+    END IF;
+
+    IF NOT v_is_privileged AND NOT public.is_platform_admin() THEN
+      RAISE EXCEPTION 'Acesso negado: uma academia não pode alterar diretamente seu próprio plano, status de licença ou validade do período de teste.'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
 -- 3. VINCULAR CONTAS DE AUTH.USERS QUE JÁ EXISTIREM NO BANCO DE DADOS
+-- Temporariamente desativa o trigger durante a sincronização em lote da migration
+ALTER TABLE public.profiles DISABLE TRIGGER trg_protect_platform_admin_flag;
+
 DO $$
 DECLARE
   v_admin_user record;
@@ -119,6 +214,9 @@ BEGIN
     WHERE email = 'beaverstraining@gmail.com';
   END IF;
 END $$;
+
+-- Reativa o trigger de proteção para garantir a blindagem contínua
+ALTER TABLE public.profiles ENABLE TRIGGER trg_protect_platform_admin_flag;
 
 -- 4. ATUALIZAR public.is_platform_admin() PARA RECONHECER AMBOS OS E-MAILS
 CREATE OR REPLACE FUNCTION public.is_platform_admin()

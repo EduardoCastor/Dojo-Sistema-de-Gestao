@@ -192,11 +192,31 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, auth
 AS $$
+DECLARE
+  v_caller_role text := lower(coalesce(nullif(current_setting('role', true), ''), current_user, session_user, ''));
+  v_is_privileged boolean := false;
+  v_is_authorized_owner boolean := false;
 BEGIN
   IF NEW.is_platform_admin IS DISTINCT FROM COALESCE(OLD.is_platform_admin, false) THEN
-    -- Permitir apenas se for executado via service_role / postgres ou por um platform_admin já validado
-    IF current_setting('role', true) NOT IN ('service_role', 'postgres', 'supabase_admin')
-       AND NOT public.is_platform_admin() THEN
+    -- Permitir via SQL Editor/Postgres/service_role
+    IF v_caller_role IN ('service_role', 'postgres', 'supabase_admin', 'dashboard_user', 'authenticator')
+       OR current_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR session_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role' THEN
+      v_is_privileged := true;
+    END IF;
+
+    -- Verificar se usuário é proprietário legítimo listado
+    IF NOT v_is_privileged THEN
+      SELECT EXISTS (
+        SELECT 1
+        FROM auth.users u
+        WHERE u.id = NEW.id
+          AND lower(trim(u.email)) IN ('admin@tatameclub.com.br', 'beaverstraining@gmail.com')
+      ) INTO v_is_authorized_owner;
+    END IF;
+
+    IF NOT v_is_privileged AND NOT v_is_authorized_owner AND NOT public.is_platform_admin() THEN
       RAISE EXCEPTION 'Violação de segurança: você não possui autorização para conceder ou alterar o papel de Administrador Global do SaaS.'
         USING ERRCODE = '42501';
     END IF;
@@ -218,6 +238,9 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, auth
 AS $$
+DECLARE
+  v_caller_role text := lower(coalesce(nullif(current_setting('role', true), ''), current_user, session_user, ''));
+  v_is_privileged boolean := false;
 BEGIN
   IF (
     NEW.plan_id IS DISTINCT FROM OLD.plan_id OR
@@ -225,8 +248,14 @@ BEGIN
     NEW.trial_started_at IS DISTINCT FROM OLD.trial_started_at OR
     NEW.trial_expires_at IS DISTINCT FROM OLD.trial_expires_at
   ) THEN
-    IF current_setting('role', true) NOT IN ('service_role', 'postgres', 'supabase_admin')
-       AND NOT public.is_platform_admin() THEN
+    IF v_caller_role IN ('service_role', 'postgres', 'supabase_admin', 'dashboard_user', 'authenticator')
+       OR current_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR session_user IN ('postgres', 'supabase_admin', 'service_role', 'dashboard_user')
+       OR coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role' THEN
+      v_is_privileged := true;
+    END IF;
+
+    IF NOT v_is_privileged AND NOT public.is_platform_admin() THEN
       RAISE EXCEPTION 'Acesso negado: uma academia não pode alterar diretamente seu próprio plano, status de licença ou validade do período de teste.'
         USING ERRCODE = '42501';
     END IF;
