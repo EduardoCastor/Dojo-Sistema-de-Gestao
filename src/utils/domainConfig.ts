@@ -17,7 +17,7 @@ export const SECONDARY_PLATFORM_OWNER_EMAIL = 'beaverstraining@gmail.com';
 export const LEGACY_PLATFORM_OWNER_EMAIL = 'beaverstraining@gmail.com';
 
 function resolveAuthorizedOwnerEmails(): string[] {
-  const baseList: string[] = ['admin@tatameclub.com.br', 'beaverstraining@gmail.com'];
+  const baseList: string[] = ['admin@tatameclub.com.br', 'beaverstraining@gmail.com', 'carloseduardocastor@gmail.com'];
   try {
     const envSources = [
       typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_PLATFORM_OWNER_EMAIL : undefined,

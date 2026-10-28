@@ -18,6 +18,9 @@
  */
 
 // Mock de localStorage para execução no ambiente Node/TSX
+delete process.env.VITE_SUPABASE_URL;
+delete process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+delete process.env.VITE_SUPABASE_ANON_KEY;
 const memoryStore = new Map<string, string>();
 (globalThis as any).localStorage = {
   getItem: (key: string) => (memoryStore.has(key) ? memoryStore.get(key)! : null),

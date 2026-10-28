@@ -1,3 +1,6 @@
+delete process.env.VITE_SUPABASE_URL;
+delete process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+delete process.env.VITE_SUPABASE_ANON_KEY;
 import { DataStore } from '../data/storage';
 import { saasPlatformService } from '../services/saasPlatformService';
 import {

@@ -102,3 +102,18 @@ Para que o botão **"Solicitar Plano e Receber Chave Pix"** registre com sucesso
    - A RPC `public.request_saas_plan_subscription(...)` com `SECURITY DEFINER` e permissão para `authenticated`.
    - O comando `NOTIFY pgrst, 'reload schema';` para atualizar instantaneamente o cache de RPCs do Supabase.
 
+
+---
+
+## 8. Aplicação da Migration 32 (Ativação Manual de Licenças SaaS e Controles Administrativos)
+
+Para corrigir o erro `Could not find the function public.admin_manual_activate_subscription(p_extend_days, p_reason, p_tenant_id) in the schema cache`:
+
+1. No **SQL Editor** do Supabase (`https://supabase.com/dashboard/project/knmzzndugadmklzzgtaa/sql/new`):
+2. Execute integralmente o arquivo `supabase/migrations/32_fix_admin_manual_activate_subscription_and_tenant_controls.sql`.
+3. A migration aplica com segurança:
+   - A RPC `public.admin_manual_activate_subscription(p_tenant_id uuid, p_reason text, p_extend_days integer DEFAULT 30)` corrigindo referências a `trade_name`, chaves UUID e colunas de `platform_audit_logs`.
+   - Preservação da regra de vigência (se ativa, estende a partir de `current_period_end`; se vencida, inicia de `now()`).
+   - Proteção estrita das tabelas financeiras (não altera `saas_payments` nem mensalidades).
+   - As RPCs administrativas complementares `public.admin_suspend_tenant` e `public.admin_reactivate_tenant`.
+   - Concessão de permissões de execução para `authenticated` e emissão do sinal `NOTIFY pgrst, 'reload schema';` para recarga imediata do cache do PostgREST.

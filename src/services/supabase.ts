@@ -44,12 +44,14 @@ const supabaseKey = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY') || getEnvVar('VIT
 
 // Validação de configuração
 export const isSupabaseConfigured = (): boolean => {
+  const currentUrl = normalizeSupabaseUrl(getEnvVar('VITE_SUPABASE_URL'));
+  const currentKey = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY') || getEnvVar('VITE_SUPABASE_ANON_KEY');
   return Boolean(
-    supabaseUrl &&
-    supabaseKey &&
-    supabaseUrl !== 'https://your-project.supabase.co' &&
-    supabaseKey !== 'your-anon-or-publishable-key' &&
-    supabaseUrl.startsWith('https://')
+    currentUrl &&
+    currentKey &&
+    currentUrl !== 'https://your-project.supabase.co' &&
+    currentKey !== 'your-anon-or-publishable-key' &&
+    currentUrl.startsWith('https://')
   );
 };
 

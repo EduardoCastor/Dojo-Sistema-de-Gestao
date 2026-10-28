@@ -146,6 +146,10 @@ function assertGlobalAdminActor(actorUserId: string, actorUserName?: string, act
     }
   }
 
+  if (!actorUserId || actorUserId.trim() === '') {
+    throw new Error('Identificação do Administrador Global obrigatória para realizar esta operação.');
+  }
+
   if (matchedById) {
     if (matchedById.role !== 'superadmin' || !isAuthorizedPlatformOwnerEmail(matchedById.email)) {
       throw new Error(
@@ -155,9 +159,9 @@ function assertGlobalAdminActor(actorUserId: string, actorUserName?: string, act
     return;
   }
 
-  if (!actorUserId || actorUserId.trim() === '') {
-    throw new Error('Identificação do Administrador Global obrigatória para realizar esta operação.');
-  }
+  throw new Error(
+    'Acesso negado (403): usuário não reconhecido como Administrador Global autorizado.'
+  );
 }
 
 function mapSupabaseTenantRow(r: any, existing?: Tenant): Tenant {
@@ -1842,28 +1846,42 @@ export const saasPlatformService = {
     const nowIso = new Date().toISOString();
 
     if (isSupabaseConfigured() && supabase) {
-      const { error } = await supabase.from('saas_commercial_plans').upsert(
-        {
-          id: plan.id,
-          name: plan.name,
-          description: plan.description || plan.tagline || '',
-          monthly_price: Number(plan.price || 0),
-          annual_price: Number(plan.annualPrice ?? Number((plan.price * 12 * 0.85).toFixed(2))),
-          max_students: Number(plan.maxStudents || 100),
-          max_branches: Number(plan.maxBranches || 1),
-          max_classes: Number(plan.maxClasses || 20),
-          max_team_users: Number(plan.maxUsers || 5),
-          allow_financial_module: true,
-          allow_digital_library: Boolean(plan.features?.digitalLibrary),
-          allow_anthropometry: true,
-          allow_competitions: Boolean(plan.features?.competitions),
-          active: plan.active !== false,
-        },
-        { onConflict: 'id' }
-      );
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        const { error } = await supabase.from('saas_commercial_plans').upsert(
+          {
+            id: plan.id,
+            name: plan.name,
+            description: plan.description || plan.tagline || '',
+            tagline: plan.tagline || '',
+            price: Number(plan.price || 0),
+            monthly_price: Number(plan.price || 0),
+            annual_price: Number(plan.annualPrice ?? Number((plan.price * 12 * 0.85).toFixed(2))),
+            max_students: Number(plan.maxStudents || 100),
+            max_branches: Number(plan.maxBranches || 1),
+            max_storage_gb: Number(plan.maxStorageGb || 10),
+            features: {
+              digitalLibrary: Boolean(plan.features?.digitalLibrary),
+              beltExams: Boolean(plan.features?.beltExams),
+              competitions: Boolean(plan.features?.competitions),
+              advancedReports: Boolean(plan.features?.advancedReports),
+              multiBranch: Boolean(plan.features?.multiBranch),
+              customBranding: Boolean(plan.features?.customBranding),
+              automatedNotifications: Boolean(plan.features?.automatedNotifications),
+              anthropometry: true,
+              financialModule: true,
+              maxClasses: Number(plan.maxClasses || 20),
+              maxUsers: Number(plan.maxUsers || 5),
+            },
+            active: plan.active !== false,
+            updated_at: nowIso,
+          },
+          { onConflict: 'id' }
+        );
 
-      if (error) {
-        throw new Error(`Não foi possível persistir o plano comercial no Supabase: ${error.message}`);
+        if (error) {
+          throw new Error(`Não foi possível persistir o plano comercial no Supabase: ${error.message}`);
+        }
       }
     }
 
@@ -1953,25 +1971,28 @@ export const saasPlatformService = {
     }
 
     if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
-      const { data, error } = await supabase.rpc('admin_suspend_tenant', {
-        p_tenant_id: tenantId,
-        p_reason: reason.trim(),
-      });
-      if (error) {
-        throw new Error(`Falha ao suspender academia no Supabase: ${error.message}`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        const { data, error } = await supabase.rpc('admin_suspend_tenant', {
+          p_tenant_id: tenantId,
+          p_reason: reason.trim(),
+        });
+        if (error) {
+          throw new Error(`Falha ao suspender academia no Supabase: ${error.message}`);
+        }
+        if (data?.tenant) {
+          const tenants = DataStore.getTenants();
+          const existing = tenants.find((t) => t.id === tenantId);
+          const updatedTenant = mapSupabaseTenantRow(data.tenant, existing);
+          const idx = tenants.findIndex((t) => t.id === tenantId);
+          if (idx >= 0) tenants[idx] = updatedTenant;
+          DataStore.saveTenants(tenants);
+        }
+        if (data?.subscription) {
+          DataStore.saveSaaSSubscription(mapSupabaseSubscriptionRow(data.subscription));
+        }
+        return true;
       }
-      if (data?.tenant) {
-        const tenants = DataStore.getTenants();
-        const existing = tenants.find((t) => t.id === tenantId);
-        const updatedTenant = mapSupabaseTenantRow(data.tenant, existing);
-        const idx = tenants.findIndex((t) => t.id === tenantId);
-        if (idx >= 0) tenants[idx] = updatedTenant;
-        DataStore.saveTenants(tenants);
-      }
-      if (data?.subscription) {
-        DataStore.saveSaaSSubscription(mapSupabaseSubscriptionRow(data.subscription));
-      }
-      return true;
     }
 
     const tenants = DataStore.getTenants();
@@ -2025,25 +2046,28 @@ export const saasPlatformService = {
     }
 
     if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
-      const { data, error } = await supabase.rpc('admin_reactivate_tenant', {
-        p_tenant_id: tenantId,
-        p_reason: cleanReason,
-      });
-      if (error) {
-        throw new Error(`Falha ao reativar academia no Supabase: ${error.message}`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        const { data, error } = await supabase.rpc('admin_reactivate_tenant', {
+          p_tenant_id: tenantId,
+          p_reason: cleanReason,
+        });
+        if (error) {
+          throw new Error(`Falha ao reativar academia no Supabase: ${error.message}`);
+        }
+        if (data?.tenant) {
+          const tenants = DataStore.getTenants();
+          const existing = tenants.find((t) => t.id === tenantId);
+          const updatedTenant = mapSupabaseTenantRow(data.tenant, existing);
+          const idx = tenants.findIndex((t) => t.id === tenantId);
+          if (idx >= 0) tenants[idx] = updatedTenant;
+          DataStore.saveTenants(tenants);
+        }
+        if (data?.subscription) {
+          DataStore.saveSaaSSubscription(mapSupabaseSubscriptionRow(data.subscription));
+        }
+        return true;
       }
-      if (data?.tenant) {
-        const tenants = DataStore.getTenants();
-        const existing = tenants.find((t) => t.id === tenantId);
-        const updatedTenant = mapSupabaseTenantRow(data.tenant, existing);
-        const idx = tenants.findIndex((t) => t.id === tenantId);
-        if (idx >= 0) tenants[idx] = updatedTenant;
-        DataStore.saveTenants(tenants);
-      }
-      if (data?.subscription) {
-        DataStore.saveSaaSSubscription(mapSupabaseSubscriptionRow(data.subscription));
-      }
-      return true;
     }
 
     const tenants = DataStore.getTenants();
@@ -2672,26 +2696,29 @@ export const saasPlatformService = {
     const days = Math.max(1, extendDays || 30);
 
     if (isSupabaseConfigured() && supabase && isValidUUID(tenantId)) {
-      const { data, error } = await supabase.rpc('admin_manual_activate_subscription', {
-        p_tenant_id: tenantId,
-        p_reason: reason.trim(),
-        p_extend_days: days,
-      });
-      if (error) {
-        throw new Error(`Falha ao ativar licença manualmente no Supabase: ${error.message}`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        const { data, error } = await supabase.rpc('admin_manual_activate_subscription', {
+          p_tenant_id: tenantId,
+          p_reason: reason.trim(),
+          p_extend_days: days,
+        });
+        if (error) {
+          throw new Error(`Falha ao ativar licença manualmente no Supabase: ${error.message}`);
+        }
+        if (data?.tenant) {
+          const tenants = DataStore.getTenants();
+          const existing = tenants.find((t) => t.id === tenantId);
+          const updatedTenant = mapSupabaseTenantRow(data.tenant, existing);
+          const idx = tenants.findIndex((t) => t.id === tenantId);
+          if (idx >= 0) tenants[idx] = updatedTenant;
+          DataStore.saveTenants(tenants);
+        }
+        if (data?.subscription) {
+          DataStore.saveSaaSSubscription(mapSupabaseSubscriptionRow(data.subscription));
+        }
+        return true;
       }
-      if (data?.tenant) {
-        const tenants = DataStore.getTenants();
-        const existing = tenants.find((t) => t.id === tenantId);
-        const updatedTenant = mapSupabaseTenantRow(data.tenant, existing);
-        const idx = tenants.findIndex((t) => t.id === tenantId);
-        if (idx >= 0) tenants[idx] = updatedTenant;
-        DataStore.saveTenants(tenants);
-      }
-      if (data?.subscription) {
-        DataStore.saveSaaSSubscription(mapSupabaseSubscriptionRow(data.subscription));
-      }
-      return true;
     }
 
     const tenants = DataStore.getTenants();
@@ -2699,7 +2726,11 @@ export const saasPlatformService = {
     if (!tenant && !sub) throw new Error('Assinatura ou academia não encontrada.');
 
     const nowIso = new Date().toISOString();
-    const newPeriodEnd = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    const isCurrentPeriodValid = Boolean(
+      sub?.currentPeriodEnd && new Date(sub.currentPeriodEnd).getTime() > Date.now()
+    );
+    const baseDate = isCurrentPeriodValid ? new Date(sub!.currentPeriodEnd) : new Date();
+    const newPeriodEnd = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
     const newDueDate = newPeriodEnd.split('T')[0];
 
     const plans = DataStore.getCommercialPlans();
@@ -2729,9 +2760,15 @@ export const saasPlatformService = {
       if (!sub.amount || sub.amount <= 0) {
         sub.amount = targetPlan.price;
       }
-      sub.currentPeriodStart = nowIso;
+      if (!isCurrentPeriodValid) {
+        sub.currentPeriodStart = nowIso;
+      }
       sub.currentPeriodEnd = newPeriodEnd;
       sub.nextDueDate = newDueDate;
+      sub.suspendedAt = undefined;
+      sub.suspendedReason = undefined;
+      sub.canceledAt = undefined;
+      sub.cancelReason = undefined;
       sub.manualActivation = {
         activatedByUserId: actorUserId,
         activatedByUserName: actorUserName,
@@ -2781,7 +2818,17 @@ export const saasPlatformService = {
       `Ativação manual de cortesia/concessão para a academia "${
         tenant?.tradeName || sub!.tenantId
       }". Vigência estendida em ${days} dias (até ${newDueDate}). Motivo: ${reason.trim()}`,
-      { tenantId: sub!.tenantId, tenantName: tenant?.tradeName, reason: reason.trim() }
+      {
+        tenantId: sub!.tenantId,
+        tenantName: tenant?.tradeName,
+        reason: reason.trim(),
+        metadata: {
+          reason: reason.trim(),
+          extendedDays: days,
+          newPeriodEnd,
+          planId: targetPlan.id,
+        },
+      }
     );
 
     return true;
@@ -3258,12 +3305,14 @@ export const saasPlatformService = {
             authorizedOwnerEmails: authEmails,
             accountExists: Boolean(data.account_exists || localState.bootstrapped),
             emailConfirmed: Boolean(data.email_confirmed || localState.bootstrapped),
-            bootstrapCompleted: Boolean(
-              data.bootstrap_completed ||
-                (localState.bootstrapped &&
-                  (localState.bootstrappedEmails?.includes(targetEmail) ||
-                    localState.ownerEmail.toLowerCase() === targetEmail))
-            ),
+            bootstrapCompleted: localState.bootstrapped === false
+              ? false
+              : Boolean(
+                  data.bootstrap_completed ||
+                    (localState.bootstrapped &&
+                      (localState.bootstrappedEmails?.includes(targetEmail) ||
+                        localState.ownerEmail.toLowerCase() === targetEmail))
+                ),
           };
         }
 
@@ -3278,12 +3327,14 @@ export const saasPlatformService = {
             authorizedOwnerEmails: fallbackEmails,
             accountExists: Boolean(dataNoParam.account_exists || localState.bootstrapped),
             emailConfirmed: Boolean(dataNoParam.email_confirmed || localState.bootstrapped),
-            bootstrapCompleted: Boolean(
-              dataNoParam.bootstrap_completed ||
-                (localState.bootstrapped &&
-                  (localState.bootstrappedEmails?.includes(targetEmail) ||
-                    localState.ownerEmail.toLowerCase() === targetEmail))
-            ),
+            bootstrapCompleted: localState.bootstrapped === false
+              ? false
+              : Boolean(
+                  dataNoParam.bootstrap_completed ||
+                    (localState.bootstrapped &&
+                      (localState.bootstrappedEmails?.includes(targetEmail) ||
+                        localState.ownerEmail.toLowerCase() === targetEmail))
+                ),
           };
         }
 
