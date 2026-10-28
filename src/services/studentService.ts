@@ -1647,6 +1647,9 @@ export const studentService = {
           monthlyFee: Number(row.monthly_fee) || 0,
           planId: row.plan_id || undefined,
           notes: row.notes || undefined,
+          address: row.address && Object.keys(row.address).length > 0
+            ? row.address
+            : (personMap.get(row.person_id)?.address || undefined),
         };
       });
 
@@ -2688,7 +2691,7 @@ export const studentService = {
             gender: 'other',
             phone: payload.guardianPhone?.trim() || null,
             email: payload.guardianEmail?.trim() || 'responsavel@tatamehub.com.br',
-            address: personAddress,
+            address: guardianInitialAddress || {},
           })
           .select()
           .single();
@@ -2941,7 +2944,7 @@ export const studentService = {
       gender: payload.gender,
       phone: payload.phone || '',
       email: payload.email || '',
-      address: updatedPerson.address || personAddress,
+      address: updatedPerson.address || studentAddress,
       createdAt: updatedPerson.created_at,
     };
 
@@ -2957,6 +2960,7 @@ export const studentService = {
       monthlyFee: Number(updatedStudentData.monthly_fee) || payload.monthlyFee,
       planId: updatedStudentData?.plan_id || payload.planId || undefined,
       notes: updatedStudentData.notes || undefined,
+      address: updatedStudentData.address || studentAddress,
     };
 
     return {

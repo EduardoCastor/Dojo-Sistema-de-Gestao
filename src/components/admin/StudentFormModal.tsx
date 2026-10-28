@@ -20,7 +20,10 @@ import {
   CreditCard,
   Save,
   RotateCcw,
+  MapPin,
+  Copy,
 } from 'lucide-react';
+import { CepInput } from '../common/CepInput';
 import {
   Student,
   Person,
