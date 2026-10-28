@@ -30,6 +30,8 @@ export interface SaaSPlan {
   };
 }
 
+export type TenantStatus = 'trial' | 'active' | 'suspended' | 'canceled';
+
 export interface Tenant {
   id: string;
   tradeName: string; // Nome Fantasia
@@ -53,7 +55,7 @@ export interface Tenant {
     zip?: string;
   };
   planId: SaaSPlanId;
-  status: 'trial' | 'active' | 'suspended' | 'canceled' | 'expired';
+  status: TenantStatus;
   suspendedAt?: string;
   suspendedReason?: string;
   updatedAt?: string;

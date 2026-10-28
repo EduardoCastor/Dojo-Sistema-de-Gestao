@@ -117,3 +117,18 @@ Para corrigir o erro `Could not find the function public.admin_manual_activate_s
    - Proteção estrita das tabelas financeiras (não altera `saas_payments` nem mensalidades).
    - As RPCs administrativas complementares `public.admin_suspend_tenant` e `public.admin_reactivate_tenant`.
    - Concessão de permissões de execução para `authenticated` e emissão do sinal `NOTIFY pgrst, 'reload schema';` para recarga imediata do cache do PostgREST.
+
+---
+
+## 9. Aplicação da Migration 33 (Correção do Erro tenant_status "expired" e Cadastro de Academias)
+
+Para corrigir o erro `invalid input value for enum tenant_status: "expired" (SQLSTATE: 22P02)` ocorrido ao cadastrar academias no Plano Teste Gratuito de 10 dias:
+
+1. No **SQL Editor** do Supabase (`https://supabase.com/dashboard/project/knmzzndugadmklzzgtaa/sql/new`):
+2. Execute integralmente o arquivo `supabase/migrations/33_fix_tenant_status_enum_and_registration.sql`.
+3. A migration aplica com segurança:
+   - Atualização de `public.get_tenant_effective_limits(uuid)` eliminando qualquer comparação de `v_tenant.status` com `'expired'` (pois o enum `tenant_status` só aceita `'trial'`, `'active'`, `'suspended'`, `'canceled'`).
+   - Fornecimento de todas as chaves de limites esperadas pelos gatilhos `trg_enforce_tenant_branch_limit` e `trg_enforce_tenant_user_limit`.
+   - Atualização da RPC `public.register_academy_atomic(...)` para criação atômica e íntegra da academia com `status = 'trial'::public.tenant_status` e assinatura de 10 dias de degustação gratuita sem cobrança.
+   - Atualização de `public.admin_reactivate_tenant(...)` para garantir que o tenant receba sempre um valor válido do enum.
+   - Concessão de permissões de execução para `authenticated` e `anon` e emissão do sinal `NOTIFY pgrst, 'reload schema';`.

@@ -137,7 +137,7 @@ async function runTestSuite() {
   // Se o trial tiver expirado, o status pending_payment deve manter o acesso bloqueado até validação real
   const expiredTenant: Tenant = {
     ...testTenant,
-    status: 'expired',
+    status: 'trial',
     planId: 'trial',
     trialExpiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
   };

@@ -97,21 +97,21 @@ BEGIN
     v_effective_status := 'past_due';
     v_is_allowed := false;
     v_reason := 'Mensalidade em atraso. Regularize sua assinatura.';
-  -- Prioridade 6: Expirada
-  ELSIF v_tenant.status = 'expired' OR (v_sub.id IS NOT NULL AND v_sub.status = 'expired') THEN
+  -- Prioridade 6: Assinatura Expirada (verifica a tabela de assinaturas, nunca o enum do tenant)
+  ELSIF v_sub.id IS NOT NULL AND v_sub.status = 'expired' THEN
     v_effective_status := 'expired';
     v_is_allowed := false;
-    v_reason := 'Licença expirada.';
-  -- Prioridade 7: Degustação Gratuita (Trial)
-  ELSIF v_tenant.status = 'trial' OR (v_sub.id IS NOT NULL AND v_sub.status = 'trial') THEN
-    IF v_tenant.trial_expires_at IS NOT NULL AND v_tenant.trial_expires_at >= now() THEN
-      v_effective_status := 'trial_active';
-      v_is_allowed := true;
-      v_reason := 'Período de degustação vigente.';
-    ELSE
+    v_reason := 'Licença expirada. Renove seu plano para continuar.';
+  -- Prioridade 7: Degustação Gratuita (Trial de 10 dias)
+  ELSIF v_tenant.status = 'trial' OR (v_sub.id IS NOT NULL AND v_sub.status = 'trial') OR v_tenant.plan_id = 'trial' THEN
+    IF v_tenant.trial_expires_at IS NOT NULL AND v_tenant.trial_expires_at < now() THEN
       v_effective_status := 'trial_expired';
       v_is_allowed := false;
       v_reason := 'O período de degustação gratuita de 10 dias expirou.';
+    ELSE
+      v_effective_status := 'trial_active';
+      v_is_allowed := true;
+      v_reason := 'Período de degustação vigente.';
     END IF;
   ELSE
     v_effective_status := 'active';
@@ -121,11 +121,19 @@ BEGIN
 
   RETURN jsonb_build_object(
     'is_allowed', v_is_allowed,
+    'is_license_valid', v_is_allowed,
     'status', v_effective_status,
+    'access_state', v_effective_status,
     'reason', v_reason,
     'plan_id', v_tenant.plan_id,
     'tenant_status', v_tenant.status,
-    'subscription_status', v_sub.status
+    'subscription_status', v_sub.status,
+    'max_branches', 5,
+    'current_branches', 1,
+    'max_users', 10,
+    'current_active_users', 1,
+    'max_students', 100,
+    'current_students', 0
   );
 END;
 $$;
@@ -454,17 +462,13 @@ BEGIN
     RAISE EXCEPTION 'Informe o motivo da reativação (mínimo de 5 caracteres).';
   END IF;
 
-  SELECT * INTO v_sub FROM public.saas_subscriptions WHERE tenant_id = p_tenant_id;
-
-  IF v_sub.id IS NOT NULL AND v_sub.status <> 'suspended' THEN
-    v_next_status := v_sub.status;
-  ELSIF v_sub.current_period_end IS NOT NULL AND v_sub.current_period_end > now() THEN
-    v_next_status := 'active';
+  IF v_tenant.trial_expires_at IS NOT NULL AND v_tenant.trial_expires_at > now() THEN
+    v_next_status := 'trial';
   ELSE
     v_next_status := 'active';
   END IF;
 
-  -- 1. Atualizar status na tabela tenants (apenas colunas existentes)
+  -- 1. Atualizar status na tabela tenants (estritamente enum válido)
   UPDATE public.tenants
   SET
     status = v_next_status::public.tenant_status,

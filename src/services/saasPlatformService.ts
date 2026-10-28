@@ -673,7 +673,7 @@ export const saasPlatformService = {
       const diffMs = trialExpiryMs - nowMs;
       const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
       const isTrialStillValid =
-        tenant.status !== 'expired' &&
+        tenant.status === 'trial' &&
         !Number.isNaN(trialExpiryMs) &&
         daysLeft > 0;
 
@@ -801,10 +801,9 @@ export const saasPlatformService = {
       };
     }
 
-    // 7. Status de Degustação (Trial) ou Expirado
+    // 7. Status de Degustação (Trial) ou Assinatura Expirada
     if (
       tenant.status === 'trial' ||
-      tenant.status === 'expired' ||
       subscription?.status === 'trial' ||
       subscription?.status === 'expired' ||
       tenant?.planId === 'trial'
@@ -814,7 +813,7 @@ export const saasPlatformService = {
       const diffMs = trialExpiry - now;
       const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-      if (daysLeft < 0 || tenant.status === 'expired' || subscription?.status === 'expired') {
+      if (daysLeft < 0 || subscription?.status === 'expired') {
         return {
           isAllowed: false,
           accessState: 'trial_expired',
