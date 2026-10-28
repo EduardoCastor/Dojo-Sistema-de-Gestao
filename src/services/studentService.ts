@@ -24,6 +24,15 @@ export interface CreateStudentPayload {
   phone?: string;
   email?: string;
   city?: string;
+  address?: {
+    street?: string;
+    number?: string;
+    complement?: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+  };
   monthlyFee: number;
   planId?: string | null;
   martialArtId: string;
@@ -55,6 +64,15 @@ export interface UpdateStudentPayload {
   phone?: string;
   email?: string;
   city?: string;
+  address?: {
+    street?: string;
+    number?: string;
+    complement?: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+  };
   monthlyFee: number;
   planId?: string | null;
   effectiveCompetence?: string;
@@ -678,6 +696,40 @@ export const studentService = {
       dependentsCount: dependents.length,
       dependents,
     };
+  },
+
+  /**
+   * Consulta uma pessoa física pelo seu UUID no tenant.
+   */
+  async findPersonById(tenantId: string, personId: string): Promise<Person | null> {
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(personId) || !isValidUUID(tenantId)) {
+      return null;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('persons')
+        .select('*')
+        .eq('id', personId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+      if (error || !data) return null;
+      return {
+        id: data.id,
+        tenantId: data.tenant_id,
+        fullName: data.full_name,
+        socialName: data.social_name || undefined,
+        cpf: data.cpf || '',
+        birthDate: data.birth_date,
+        gender: (data.gender as any) || 'other',
+        phone: data.phone || '',
+        email: data.email || '',
+        address: data.address || {},
+        createdAt: data.created_at,
+      };
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -1675,6 +1727,16 @@ export const studentService = {
 
     const regNumber = `MAT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
+    const studentAddress = {
+      street: payload.address?.street?.trim() || '',
+      number: payload.address?.number?.trim() || '',
+      complement: payload.address?.complement?.trim() || undefined,
+      neighborhood: payload.address?.neighborhood?.trim() || '',
+      city: payload.address?.city?.trim() || payload.city?.trim() || '',
+      state: (payload.address?.state?.trim() || 'SP').toUpperCase(),
+      zipCode: payload.address?.zipCode?.trim() || '',
+    };
+
     const personPayload = {
       full_name: payload.fullName.trim(),
       social_name: payload.socialName?.trim() || null,
@@ -1683,14 +1745,7 @@ export const studentService = {
       gender: payload.gender || 'male',
       phone: payload.phone?.trim() || null,
       email: payload.email?.trim() || null,
-      address: {
-        street: 'Rua das Flores',
-        number: '123',
-        neighborhood: 'Centro',
-        city: payload.city || 'São Paulo',
-        state: 'SP',
-        zipCode: '01000-000',
-      },
+      address: studentAddress,
     };
 
     const studentPayload = {
@@ -1700,9 +1755,17 @@ export const studentService = {
       monthly_fee: payload.monthlyFee,
       plan_id: payload.planId && isValidUUID(payload.planId) ? payload.planId : null,
       notes: null,
+      address: studentAddress,
     };
 
     const effectiveReusedGuardianId = payload.reusedGuardianPersonId || payload.guardianPersonId;
+    let initialGuardianAddress: any = {};
+    if (effectiveReusedGuardianId) {
+      const existingG = await this.findPersonById(payload.tenantId, effectiveReusedGuardianId);
+      if (existingG?.address) {
+        initialGuardianAddress = existingG.address;
+      }
+    }
     const guardianPersonPayload = (payload.hasGuardian && payload.guardianName?.trim()) ? {
       id: effectiveReusedGuardianId || null,
       full_name: payload.guardianName.trim(),
@@ -1711,7 +1774,7 @@ export const studentService = {
       gender: 'other',
       phone: payload.guardianPhone?.trim() || payload.phone?.trim() || null,
       email: payload.guardianEmail?.trim() || 'responsavel@tatamehub.com.br',
-      address: personPayload.address,
+      address: initialGuardianAddress,
     } : null;
 
     const guardianRelPayload = guardianPersonPayload ? {
@@ -1831,7 +1894,7 @@ export const studentService = {
             gender: 'other',
             phone: guardianPersonPayload.phone || '',
             email: guardianPersonPayload.email || '',
-            address: personPayload.address,
+            address: initialGuardianAddress || {},
             createdAt: new Date().toISOString(),
           };
 
@@ -1895,6 +1958,7 @@ export const studentService = {
         status: 'active',
         monthly_fee: payload.monthlyFee,
         plan_id: payload.planId && isValidUUID(payload.planId) ? payload.planId : null,
+        address: studentAddress,
       })
       .select()
       .single();
@@ -1942,7 +2006,7 @@ export const studentService = {
           }
         }
 
-        // Se ainda não temos a pessoa, inserir nova em persons
+        // Se ainda não temos a pessoa, inserir nova em persons com endereço próprio
         if (!guardianPersonIdToLink) {
           const { data: gpData, error: gpErr } = await supabase
             .from('persons')
@@ -1954,7 +2018,7 @@ export const studentService = {
               gender: guardianPersonPayload.gender,
               phone: guardianPersonPayload.phone,
               email: guardianPersonPayload.email,
-              address: personPayload.address,
+              address: initialGuardianAddress || {},
             })
             .select()
             .single();
@@ -1972,7 +2036,7 @@ export const studentService = {
               gender: gpData.gender,
               phone: gpData.phone || '',
               email: gpData.email || '',
-              address: personPayload.address,
+              address: gpData.address || initialGuardianAddress || {},
               createdAt: gpData.created_at,
             };
           }
@@ -2080,6 +2144,7 @@ export const studentService = {
       ],
       monthlyFee: payload.monthlyFee,
       planId: payload.planId || undefined,
+      address: studentAddress,
     };
 
     const resultPerson: Person = {
@@ -2152,14 +2217,23 @@ export const studentService = {
       }
     }
 
-    const personAddress = {
-      street: 'Rua das Flores',
-      number: '123',
-      neighborhood: 'Centro',
-      city: payload.city || 'São Paulo',
-      state: 'SP',
-      zipCode: '01000-000',
-    };
+    const studentAddress = payload.address ? {
+      street: payload.address.street?.trim() || '',
+      number: payload.address.number?.trim() || '',
+      complement: payload.address.complement?.trim() || undefined,
+      neighborhood: payload.address.neighborhood?.trim() || '',
+      city: payload.address.city?.trim() || payload.city?.trim() || '',
+      state: (payload.address.state?.trim() || 'SP').toUpperCase(),
+      zipCode: payload.address.zipCode?.trim() || '',
+    } : (payload.city ? { city: payload.city.trim() } : undefined);
+
+    let guardianInitialAddress: any = {};
+    if (effectiveGuardianPersonId) {
+      const foundG = await this.findPersonById(payload.tenantId, effectiveGuardianPersonId);
+      if (foundG?.address) {
+        guardianInitialAddress = foundG.address;
+      }
+    }
 
     // 0.1. Tentar executar via RPC atômica update_student_atomic (transação segura ACID)
     try {
@@ -2171,7 +2245,7 @@ export const studentService = {
         gender: 'other',
         phone: payload.guardianPhone?.trim() || payload.phone?.trim() || null,
         email: payload.guardianEmail?.trim() || 'responsavel@tatamehub.com.br',
-        address: personAddress,
+        address: guardianInitialAddress,
       } : null;
 
       const guardianRelPayload = guardianPersonPayload ? {
@@ -2203,13 +2277,14 @@ export const studentService = {
           gender: payload.gender || 'male',
           phone: payload.phone?.trim() || null,
           email: payload.email?.trim() || null,
-          address: personAddress,
+          address: studentAddress,
         },
         p_student: {
           monthly_fee: payload.monthlyFee,
           plan_id: payload.planId || null,
           status: payload.status || 'active',
           notes: null,
+          address: studentAddress,
         },
         p_guardian_person: guardianPersonPayload,
         p_guardian_rel: guardianRelPayload,
@@ -2280,6 +2355,7 @@ export const studentService = {
             monthlyFee: Number(rStudent.monthly_fee) || payload.monthlyFee,
             planId: rStudent.plan_id || payload.planId || undefined,
             notes: rStudent.notes || undefined,
+            address: rStudent.address || studentAddress,
           },
           person: {
             id: payload.personId,
@@ -2291,7 +2367,7 @@ export const studentService = {
             gender: rPerson.gender || payload.gender || 'male',
             phone: rPerson.phone || payload.phone || '',
             email: rPerson.email || payload.email || '',
-            address: rPerson.address || personAddress,
+            address: rPerson.address || studentAddress,
             createdAt: rPerson.created_at || new Date().toISOString(),
           },
           guardianPerson: rGuardianPerson ? {
@@ -2304,7 +2380,7 @@ export const studentService = {
             gender: rGuardianPerson.gender || 'other',
             phone: rGuardianPerson.phone || '',
             email: rGuardianPerson.email || '',
-            address: rGuardianPerson.address || {},
+            address: rGuardianPerson.address || guardianInitialAddress || {},
             createdAt: rGuardianPerson.created_at,
           } : undefined,
           relationship: rGuardianRel ? {
@@ -2333,7 +2409,7 @@ export const studentService = {
       gender: payload.gender || 'male',
       phone: payload.phone?.trim() || null,
       email: payload.email?.trim() || null,
-      address: personAddress,
+      address: studentAddress,
       updated_at: new Date().toISOString(),
     };
 
@@ -2383,6 +2459,7 @@ export const studentService = {
       monthly_fee: payload.monthlyFee,
       status: payload.status || 'active',
       branch_id: payload.branchId,
+      address: studentAddress,
       updated_at: new Date().toISOString(),
     };
     if (payload.planId !== undefined) {

@@ -409,6 +409,15 @@ export interface Student {
   userId?: string;
   portalAccessStatus?: PortalAccessStatus;
   allowAnthropometryView?: boolean;
+  address?: {
+    street: string;
+    number: string;
+    complement?: string;
+    neighborhood: string;
+    city: string;
+    state: string;
+    zipCode: string;
+  };
 }
 
 export interface ClassSchedule {
