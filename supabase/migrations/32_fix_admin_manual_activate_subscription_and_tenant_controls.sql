@@ -1,24 +1,24 @@
 -- ============================================================================
 -- MIGRATION 32: CORREÇÃO DEFINITIVA DA ATIVAÇÃO MANUAL DE LICENÇAS E CONTROLE DE ACESSO
 -- ============================================================================
--- Causa Raiz do Erro "Could not find the function public.admin_manual_activate_subscription in the schema cache":
--- 1. Na Migration 29 (seção 8.4), a função public.admin_manual_activate_subscription continha
---    referências inválidas a colunas inexistentes na tabela public.tenants:
---    - Tentativa de acesso a `v_tenant.name` (a coluna oficial no esquema é `trade_name`).
--- 2. Tentativa de inserção de chave primária em texto `'sub-' || ...` na tabela public.saas_subscriptions,
---    cujo tipo oficial desde a Migration 24 é UUID (`id uuid PRIMARY KEY DEFAULT gen_random_uuid()`).
--- 3. Incompatibilidade estrutural na auditoria global (public.platform_audit_logs):
---    - Tentativa de inserção de texto `'paudit-' || ...` na coluna `id` (tipo UUID gerado por gen_random_uuid()).
---    - Violação de restrição NOT NULL nas colunas obrigatórias `entity_type` e `entity_id`.
---    - Referência a colunas inexistentes `description` e `created_at` (no esquema oficial são `details`, `reason` e `timestamp`).
--- 4. Como consequência das falhas de compilação do PL/pgSQL na Migration 29, a função não foi
---    registrada no catálogo do PostgreSQL / Supabase, gerando o erro de função ausente no cache do PostgREST.
--- 5. Regras de negócio de extensão:
---    - Se a licença já estiver vigente com término no futuro (current_period_end > now()), a extensão
---      deve ser somada ao término do período atual, preservando o saldo de dias já contratados/concedidos.
---    - Se a licença estiver vencida ou expirada (current_period_end <= now() ou nula), o novo período
---      inicia a partir do momento atual (now()).
---    - Não altera pagamentos (saas_payments) nem marca confirmações fictícias de pagamento financeiro.
+-- Diagnóstico da Causa Raiz:
+-- 1. Erro: "column suspended_at of relation tenants does not exist".
+--    Na tabela public.tenants (criada na Migration 01), o estado de suspensão de uma academia
+--    é representado pelo campo enum `status tenant_status` ('trial', 'active', 'suspended', 'canceled').
+--    As colunas `suspended_at` (timestamptz) e `suspended_reason` (text) pertencem exclusivamente
+--    à tabela public.saas_subscriptions (criada na Migration 24).
+--    Portanto, instruções UPDATE na tabela public.tenants não devem referenciar suspended_at
+--    ou suspended_reason, mas sim atualizar `status = 'active'::public.tenant_status`.
+-- 2. Limpeza e reativação da assinatura (public.saas_subscriptions):
+--    A tabela saas_subscriptions é a entidade correta que armazena `suspended_at = NULL`
+--    e `suspended_reason = NULL`, além de registrar `manual_activation` (jsonb) e `notes`.
+-- 3. Função get_tenant_effective_limits(uuid):
+--    Compatibilizada para consultar a razão da suspensão a partir de v_sub.suspended_reason,
+--    evitando acesso a campos inexistentes no registro v_tenant.
+-- 4. Segurança e Auditoria:
+--    Apenas administradores globais autorizados (public.is_platform_admin() = true) podem invocar a função.
+--    Toda ativação manual é auditada em public.platform_audit_logs com colunas válidas.
+--    Não altera saas_payments nem cria confirmações fictícias de pagamento.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -27,7 +27,111 @@
 DROP FUNCTION IF EXISTS public.admin_manual_activate_subscription(uuid, text, integer);
 
 -- ----------------------------------------------------------------------------
--- 2. IMPLEMENTAÇÃO SEGURA DE public.admin_manual_activate_subscription
+-- 2. ATUALIZAR get_tenant_effective_limits PARA CONSULTAR A TABELA CORRETA
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.get_tenant_effective_limits(p_tenant_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_tenant public.tenants%ROWTYPE;
+  v_sub public.saas_subscriptions%ROWTYPE;
+  v_effective_status text;
+  v_is_allowed boolean := true;
+  v_reason text := 'Assinatura regular e ativa.';
+BEGIN
+  SELECT * INTO v_tenant FROM public.tenants WHERE id = p_tenant_id;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object(
+      'is_allowed', false,
+      'status', 'not_found',
+      'reason', 'Academia não localizada.'
+    );
+  END IF;
+
+  SELECT * INTO v_sub FROM public.saas_subscriptions WHERE tenant_id = p_tenant_id;
+
+  -- Prioridade 1: Suspensão ou Cancelamento
+  IF v_tenant.status = 'suspended' OR (v_sub.id IS NOT NULL AND v_sub.status = 'suspended') THEN
+    v_effective_status := 'suspended';
+    v_is_allowed := false;
+    v_reason := COALESCE(v_sub.suspended_reason, 'Licença suspensa administrativamente.');
+  ELSIF v_tenant.status = 'canceled' OR (v_sub.id IS NOT NULL AND v_sub.status = 'canceled') THEN
+    v_effective_status := 'canceled';
+    v_is_allowed := false;
+    v_reason := 'Assinatura cancelada.';
+  -- Prioridade 2: Assinatura Comercial Ativa
+  ELSIF v_tenant.status = 'active' AND (v_sub.id IS NULL OR v_sub.status = 'active') AND v_tenant.plan_id <> 'trial' THEN
+    IF v_sub.id IS NOT NULL AND v_sub.current_period_end IS NOT NULL
+       AND v_sub.current_period_end < (now() - interval '5 days')
+       AND COALESCE(v_sub.auto_renew, false) = false THEN
+      v_effective_status := 'expired';
+      v_is_allowed := false;
+      v_reason := 'O ciclo da assinatura expirou sem renovação confirmada.';
+    ELSE
+      v_effective_status := 'active';
+      v_is_allowed := true;
+      v_reason := 'Assinatura comercial ativa e regular.';
+    END IF;
+  -- Prioridade 3: Solicitação aguardando pagamento Pix
+  ELSIF v_sub.id IS NOT NULL AND v_sub.status IN ('pending_payment', 'waiting_payment', 'payment_under_review') THEN
+    IF v_tenant.trial_expires_at IS NOT NULL AND v_tenant.trial_expires_at >= now() THEN
+      v_effective_status := 'trial_active';
+      v_is_allowed := true;
+      v_reason := 'Solicitação de plano registrada (aguardando pagamento Pix). Acesso liberado durante a degustação vigente.';
+    ELSE
+      v_effective_status := 'pending_payment';
+      v_is_allowed := false;
+      v_reason := 'Contratação registrada e aguardando confirmação válida do pagamento Pix para liberação do acesso.';
+    END IF;
+  -- Prioridade 4: Pagamento rejeitado
+  ELSIF v_sub.id IS NOT NULL AND v_sub.status = 'rejected' THEN
+    v_effective_status := 'rejected';
+    v_is_allowed := false;
+    v_reason := 'O pagamento informado não pôde ser validado. Envie um comprovante válido ou selecione um plano.';
+  -- Prioridade 5: Em atraso
+  ELSIF v_sub.id IS NOT NULL AND v_sub.status = 'past_due' THEN
+    v_effective_status := 'past_due';
+    v_is_allowed := false;
+    v_reason := 'Mensalidade em atraso. Regularize sua assinatura.';
+  -- Prioridade 6: Expirada
+  ELSIF v_tenant.status = 'expired' OR (v_sub.id IS NOT NULL AND v_sub.status = 'expired') THEN
+    v_effective_status := 'expired';
+    v_is_allowed := false;
+    v_reason := 'Licença expirada.';
+  -- Prioridade 7: Degustação Gratuita (Trial)
+  ELSIF v_tenant.status = 'trial' OR (v_sub.id IS NOT NULL AND v_sub.status = 'trial') THEN
+    IF v_tenant.trial_expires_at IS NOT NULL AND v_tenant.trial_expires_at >= now() THEN
+      v_effective_status := 'trial_active';
+      v_is_allowed := true;
+      v_reason := 'Período de degustação vigente.';
+    ELSE
+      v_effective_status := 'trial_expired';
+      v_is_allowed := false;
+      v_reason := 'O período de degustação gratuita de 10 dias expirou.';
+    END IF;
+  ELSE
+    v_effective_status := 'active';
+    v_is_allowed := true;
+    v_reason := 'Acesso liberado.';
+  END IF;
+
+  RETURN jsonb_build_object(
+    'is_allowed', v_is_allowed,
+    'status', v_effective_status,
+    'reason', v_reason,
+    'plan_id', v_tenant.plan_id,
+    'tenant_status', v_tenant.status,
+    'subscription_status', v_sub.status
+  );
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 3. IMPLEMENTAÇÃO SEGURA DE public.admin_manual_activate_subscription
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.admin_manual_activate_subscription(
   p_tenant_id uuid,
@@ -52,7 +156,7 @@ DECLARE
   v_manual_activation_json jsonb;
   v_tenant_display_name text;
 BEGIN
-  -- 1. Validação de segurança obrigatória no servidor: apenas administradores globais autorizados
+  -- 1. Validação de segurança no servidor: apenas administradores globais autorizados
   IF NOT public.is_platform_admin() THEN
     RAISE EXCEPTION 'Acesso negado: apenas Administradores Globais podem ativar licenças manualmente.';
   END IF;
@@ -116,18 +220,16 @@ BEGIN
     'extendedDays', v_days
   );
 
-  -- 8. Atualizar status e plano do tenant
+  -- 8. Atualizar status e plano do tenant no esquema real (apenas colunas existentes)
   UPDATE public.tenants
   SET
     plan_id = v_plan.id,
-    status = 'active',
-    suspended_at = NULL,
-    suspended_reason = NULL,
+    status = 'active'::public.tenant_status,
     updated_at = now()
   WHERE id = p_tenant_id
   RETURNING * INTO v_tenant;
 
-  -- 9. Atualizar ou Criar assinatura correspondente
+  -- 9. Atualizar ou Criar assinatura correspondente (limpando flags de suspensão em saas_subscriptions)
   IF v_sub.id IS NOT NULL THEN
     UPDATE public.saas_subscriptions
     SET
@@ -234,7 +336,7 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 3. CORRIGIR public.admin_suspend_tenant E public.admin_reactivate_tenant
+-- 4. ATUALIZAR public.admin_suspend_tenant E public.admin_reactivate_tenant
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.admin_suspend_tenant(
   p_tenant_id uuid,
@@ -264,11 +366,10 @@ BEGIN
     RAISE EXCEPTION 'Informe o motivo da suspensão (mínimo de 5 caracteres).';
   END IF;
 
+  -- 1. Atualizar status na tabela tenants (apenas colunas existentes)
   UPDATE public.tenants
   SET
-    status = 'suspended',
-    suspended_at = now(),
-    suspended_reason = btrim(p_reason),
+    status = 'suspended'::public.tenant_status,
     updated_at = now()
   WHERE id = p_tenant_id
   RETURNING * INTO v_tenant;
@@ -279,6 +380,7 @@ BEGIN
 
   v_tenant_display_name := COALESCE(NULLIF(btrim(v_tenant.trade_name), ''), NULLIF(btrim(v_tenant.legal_name), ''), 'Academia');
 
+  -- 2. Gravar data e motivo da suspensão na tabela saas_subscriptions (entidade oficial)
   UPDATE public.saas_subscriptions
   SET
     status = 'suspended',
@@ -289,6 +391,7 @@ BEGIN
   WHERE tenant_id = p_tenant_id
   RETURNING * INTO v_sub;
 
+  -- 3. Registrar na trilha de auditoria global
   INSERT INTO public.platform_audit_logs (
     actor_user_id,
     actor_user_name,
@@ -361,11 +464,10 @@ BEGIN
     v_next_status := 'active';
   END IF;
 
+  -- 1. Atualizar status na tabela tenants (apenas colunas existentes)
   UPDATE public.tenants
   SET
     status = v_next_status::public.tenant_status,
-    suspended_at = NULL,
-    suspended_reason = NULL,
     updated_at = now()
   WHERE id = p_tenant_id
   RETURNING * INTO v_tenant;
@@ -376,6 +478,7 @@ BEGIN
 
   v_tenant_display_name := COALESCE(NULLIF(btrim(v_tenant.trade_name), ''), NULLIF(btrim(v_tenant.legal_name), ''), 'Academia');
 
+  -- 2. Limpar suspensão na tabela saas_subscriptions
   IF v_sub.id IS NOT NULL THEN
     UPDATE public.saas_subscriptions
     SET
@@ -388,6 +491,7 @@ BEGIN
     RETURNING * INTO v_sub;
   END IF;
 
+  -- 3. Registrar na trilha de auditoria global
   INSERT INTO public.platform_audit_logs (
     actor_user_id,
     actor_user_name,
@@ -422,8 +526,9 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 4. CONCEDER PERMISSÕES E RECARREGAR O CACHE DO SCHEMA POSTGREST
+-- 5. CONCEDER PERMISSÕES E RECARREGAR O CACHE DO SCHEMA POSTGREST
 -- ----------------------------------------------------------------------------
+GRANT EXECUTE ON FUNCTION public.get_tenant_effective_limits(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_manual_activate_subscription(uuid, text, integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_suspend_tenant(uuid, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_reactivate_tenant(uuid, text) TO authenticated;
