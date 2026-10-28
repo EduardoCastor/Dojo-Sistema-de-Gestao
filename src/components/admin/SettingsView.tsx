@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Save,
   Sparkles,
@@ -14,6 +14,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Tenant, SaaSPlan } from '../../types';
+import { CepInput } from '../common/CepInput';
 
 interface SettingsViewProps {
   tenant: Tenant;
@@ -57,6 +58,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const numberInputRef = useRef<HTMLInputElement>(null);
 
   // Sync local form state when the tenant prop updates from Supabase fetch
   useEffect(() => {
@@ -370,31 +372,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div>
+              <CepInput
+                value={zipCode}
+                onChange={setZipCode}
+                onAddressResolved={(addr) => {
+                  if (addr.logradouro) setStreet(addr.logradouro);
+                  if (addr.bairro) setNeighborhood(addr.bairro);
+                  if (addr.localidade) setCity(addr.localidade);
+                  if (addr.uf) setState(addr.uf.toUpperCase());
+                }}
+                nextInputRef={numberInputRef}
+                label="CEP"
+              />
+            </div>
             <div className="sm:col-span-2">
               <label className="block text-slate-300 font-medium mb-1">Logradouro (Rua / Av.)</label>
               <input
                 type="text"
                 value={street}
                 onChange={(e) => setStreet(e.target.value)}
+                placeholder="Rua / Avenida"
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
               />
             </div>
             <div>
               <label className="block text-slate-300 font-medium mb-1">Número</label>
               <input
+                ref={numberInputRef}
                 type="text"
                 value={number}
                 onChange={(e) => setNumber(e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">CEP</label>
-              <input
-                type="text"
-                value={zipCode}
-                onChange={(e) => setZipCode(e.target.value)}
-                placeholder="00000-000"
+                placeholder="123"
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-red-500 focus:outline-none"
               />
             </div>

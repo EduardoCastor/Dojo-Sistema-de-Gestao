@@ -18,6 +18,7 @@ import {
 import { Tenant, Branch, User as UserType } from '../../types';
 import { supabase, authService, isSupabaseConfigured, UserMembership } from '../../services/supabase';
 import { formDraftStore } from '../../utils/formDraftStore';
+import { CepInput } from '../common/CepInput';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -90,6 +91,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
 
   const wasOpenRef = useRef(false);
+  const numberInputRef = useRef<HTMLInputElement>(null);
   const supabaseActive = isSupabaseConfigured();
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -712,6 +714,22 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             <label className="block text-slate-400 font-medium mb-1.5 text-[11px]">
               Endereço da Unidade Matriz
             </label>
+            <div className="mb-2">
+              <CepInput
+                value={zipCode}
+                onChange={setZipCode}
+                onAddressResolved={(addr) => {
+                  if (addr.logradouro) setStreet(addr.logradouro);
+                  if (addr.bairro) setNeighborhood(addr.bairro);
+                  if (addr.localidade) setCity(addr.localidade);
+                  if (addr.uf) setState(addr.uf.toUpperCase());
+                }}
+                nextInputRef={numberInputRef}
+                label="CEP (busca automática de endereço)"
+                className="text-xs"
+              />
+            </div>
+
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="col-span-2">
                 <input
@@ -724,6 +742,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               </div>
               <div>
                 <input
+                  ref={numberInputRef}
                   type="text"
                   value={number}
                   onChange={(e) => setNumber(e.target.value)}
@@ -758,20 +777,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               <div>
                 <select
                   value={state}
-                  onChange={(e) => setState(e.target.value)}
+                  onChange={(e) => setState(e.target.value.toUpperCase())}
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white focus:border-red-500 focus:outline-none text-xs"
                 >
-                  <option value="SP">SP</option>
-                  <option value="RJ">RJ</option>
-                  <option value="MG">MG</option>
-                  <option value="PR">PR</option>
-                  <option value="RS">RS</option>
-                  <option value="BA">BA</option>
-                  <option value="DF">DF</option>
-                  <option value="SC">SC</option>
-                  <option value="GO">GO</option>
-                  <option value="PE">PE</option>
-                  <option value="CE">CE</option>
+                  {['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'].map(uf => (
+                    <option key={uf} value={uf}>{uf}</option>
+                  ))}
                 </select>
               </div>
             </div>

@@ -17,6 +17,7 @@ import { Person } from '../../types';
 import { studentService } from '../../services/studentService';
 import { cleanCPF, formatCPF, validateCPF, formatPhoneBR } from '../../utils/cpfValidator';
 import { formDraftStore } from '../../utils/formDraftStore';
+import { CepInput } from '../common/CepInput';
 
 interface GuardianFormModalProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
   const isEditing = Boolean(guardianToEdit);
   const draftFormKey = guardianToEdit?.id ? `guardian_form:${guardianToEdit.id}` : 'guardian_form:new';
   const initializedKeyRef = useRef<string | null>(null);
+  const numberInputRef = useRef<HTMLInputElement>(null);
 
   // Campos do Formulário
   const [fullName, setFullName] = useState('');
@@ -529,13 +531,17 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">CEP</label>
-                <input
-                  type="text"
+                <CepInput
                   value={zipCode}
-                  onChange={(e) => setZipCode(e.target.value)}
-                  placeholder="01000-000"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none font-mono"
+                  onChange={setZipCode}
+                  onAddressResolved={(addr) => {
+                    if (addr.logradouro) setStreet(addr.logradouro);
+                    if (addr.bairro) setNeighborhood(addr.bairro);
+                    if (addr.localidade) setCity(addr.localidade);
+                    if (addr.uf) setState(addr.uf.toUpperCase());
+                  }}
+                  nextInputRef={numberInputRef}
+                  label="CEP"
                 />
               </div>
 
@@ -553,6 +559,7 @@ export const GuardianFormModal: React.FC<GuardianFormModalProps> = ({
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Número</label>
                 <input
+                  ref={numberInputRef}
                   type="text"
                   value={number}
                   onChange={(e) => setNumber(e.target.value)}
