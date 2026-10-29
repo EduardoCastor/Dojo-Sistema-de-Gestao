@@ -1500,6 +1500,7 @@ export const studentService = {
           status,
           monthly_fee,
           notes,
+          address,
           created_at,
           person:persons (
             id,

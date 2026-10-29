@@ -149,9 +149,18 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   const [gender, setGender] = useState<'male' | 'female' | 'other'>('male');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [city, setCity] = useState('São Paulo');
   const [monthlyFee, setMonthlyFee] = useState('220');
   const [studentStatus, setStudentStatus] = useState<'active' | 'inactive' | 'suspended' | 'dropped'>('active');
+
+  // Student Address Data (Endereço próprio do aluno)
+  const [zipCode, setZipCode] = useState('');
+  const [street, setStreet] = useState('');
+  const [number, setNumber] = useState('');
+  const [complement, setComplement] = useState('');
+  const [neighborhood, setNeighborhood] = useState('');
+  const [city, setCity] = useState('São Paulo');
+  const [state, setState] = useState('SP');
+  const numberInputRef = useRef<HTMLInputElement>(null);
 
   // Planos de Mensalidade
   const [availablePlans, setAvailablePlans] = useState<MembershipPlan[]>([]);
@@ -416,7 +425,13 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       gender: 'male' | 'female' | 'other';
       phone: string;
       email: string;
-      city: string;
+      zipCode?: string;
+      street?: string;
+      number?: string;
+      complement?: string;
+      neighborhood?: string;
+      city?: string;
+      state?: string;
       monthlyFee: string;
       studentStatus: 'active' | 'inactive' | 'suspended' | 'dropped';
       selectedPlanId: string;
@@ -444,7 +459,13 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setGender(d.gender || 'male');
       setPhone(d.phone || '');
       setEmail(d.email || '');
+      setZipCode(d.zipCode || '');
+      setStreet(d.street || '');
+      setNumber(d.number || '');
+      setComplement(d.complement || '');
+      setNeighborhood(d.neighborhood || '');
       setCity(d.city || 'São Paulo');
+      setState(d.state || 'SP');
       setMonthlyFee(d.monthlyFee || '220');
       setStudentStatus(d.studentStatus || 'active');
       setSelectedPlanId(d.selectedPlanId || '');
@@ -472,7 +493,17 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setGender(p.gender || 'male');
       setPhone(p.phone || '');
       setEmail(p.email || '');
-      setCity(p.address?.city || 'São Paulo');
+
+      // Endereço próprio do aluno (prioriza studentToEdit.address com fallback para p.address)
+      const studentAddr = studentToEdit.address || p.address;
+      setZipCode(studentAddr?.zipCode || '');
+      setStreet(studentAddr?.street || '');
+      setNumber(studentAddr?.number || '');
+      setComplement(studentAddr?.complement || '');
+      setNeighborhood(studentAddr?.neighborhood || '');
+      setCity(studentAddr?.city || 'São Paulo');
+      setState(studentAddr?.state || 'SP');
+
       setMonthlyFee(String(studentToEdit.monthlyFee ?? 220));
       setStudentStatus(studentToEdit.status || 'active');
       const curPlan = studentToEdit.planId || '';
@@ -546,7 +577,13 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setGender('male');
       setPhone('');
       setEmail('');
+      setZipCode('');
+      setStreet('');
+      setNumber('');
+      setComplement('');
+      setNeighborhood('');
       setCity('São Paulo');
+      setState('SP');
       setMonthlyFee('220');
       setStudentStatus('active');
       setSelectedPlanId('');
@@ -573,6 +610,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       cpf.trim() ||
       phone.trim() ||
       email.trim() ||
+      zipCode.trim() ||
+      street.trim() ||
       guardianName.trim() ||
       guardianCpf.trim();
     if (!hasTypedContent) return;
@@ -592,7 +631,13 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
           gender,
           phone,
           email,
+          zipCode,
+          street,
+          number,
+          complement,
+          neighborhood,
           city,
+          state,
           monthlyFee,
           studentStatus,
           selectedPlanId,
@@ -624,7 +669,13 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     gender,
     phone,
     email,
+    zipCode,
+    street,
+    number,
+    complement,
+    neighborhood,
     city,
+    state,
     monthlyFee,
     studentStatus,
     selectedPlanId,
@@ -652,6 +703,45 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   const handleCancelAndClearDraft = () => {
     clearStudentDraft();
     onClose();
+  };
+
+  // Cópia voluntária e consciente do endereço do responsável para os campos do aluno
+  // Mantém total independência dos registros: não cria vínculo reativo nem modifica o responsável
+  const guardianAddressAvailable = useMemo(() => {
+    const candidatePerson =
+      selectedExistingGuardian?.person ||
+      guardianPersonToEdit ||
+      studentExistingLinks[0]?.guardianPerson ||
+      guardianCpfStatus?.existingPerson ||
+      (allPersons || []).find((p) => p.id === selectedExistingGuardian?.person.id);
+    return Boolean(
+      candidatePerson?.address &&
+      (candidatePerson.address.street || candidatePerson.address.zipCode || candidatePerson.address.city)
+    );
+  }, [
+    selectedExistingGuardian,
+    guardianPersonToEdit,
+    studentExistingLinks,
+    guardianCpfStatus,
+    allPersons,
+  ]);
+
+  const handleCopyGuardianAddress = () => {
+    const candidatePerson =
+      selectedExistingGuardian?.person ||
+      guardianPersonToEdit ||
+      studentExistingLinks[0]?.guardianPerson ||
+      guardianCpfStatus?.existingPerson;
+
+    if (!candidatePerson?.address) return;
+    const a = candidatePerson.address;
+    if (a.zipCode) setZipCode(a.zipCode);
+    if (a.street) setStreet(a.street);
+    if (a.number) setNumber(a.number);
+    if (a.complement) setComplement(a.complement);
+    if (a.neighborhood) setNeighborhood(a.neighborhood);
+    if (a.city) setCity(a.city);
+    if (a.state) setState(a.state.toUpperCase());
   };
 
   const handlePlanChange = (planIdValue: string) => {
@@ -1061,6 +1151,16 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     // ==========================================
     if (isEditing && studentToEdit) {
       const p = personToEdit || activePersonToEdit;
+      const studentAddress = {
+        street: street.trim(),
+        number: number.trim(),
+        complement: complement.trim() || undefined,
+        neighborhood: neighborhood.trim(),
+        city: city.trim() || 'São Paulo',
+        state: (state.trim() || 'SP').toUpperCase(),
+        zipCode: zipCode.trim(),
+      };
+
       const updatedPerson: Person = {
         ...p,
         fullName: fullName.trim(),
@@ -1070,10 +1170,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         gender,
         phone: phone || p.phone,
         email: email || p.email,
-        address: {
-          ...(p.address || {}),
-          city,
-        },
+        address: studentAddress,
       };
 
       const updatedStudent: Student = {
@@ -1081,6 +1178,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         monthlyFee: Number(monthlyFee) || studentToEdit.monthlyFee,
         planId: selectedPlanId || undefined,
         status: studentStatus,
+        address: studentAddress,
         currentGraduations: [
           {
             martialArtId: chosenArt.id,
@@ -1139,7 +1237,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
             gender: 'other',
             phone: guardianPhone || phone || '',
             email: guardianEmail || '',
-            address: updatedPerson.address,
+            address: { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
             createdAt: new Date().toISOString(),
           };
 
@@ -1166,7 +1264,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
             gender: 'other',
             phone: guardianPhone || phone || '',
             email: guardianEmail || '',
-            address: updatedPerson.address,
+            address: { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
             createdAt: new Date().toISOString(),
           };
 
@@ -1197,7 +1295,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
             gender: guardianPersonToEdit?.gender || 'other',
             phone: guardianPhone || guardianPersonToEdit?.phone || '',
             email: guardianEmail || guardianPersonToEdit?.email || '',
-            address: updatedPerson.address,
+            address: guardianPersonToEdit?.address || { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
             createdAt: guardianPersonToEdit?.createdAt || new Date().toISOString(),
           };
 
@@ -1235,6 +1333,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         phone,
         email,
         city,
+        address: studentAddress,
         monthlyFee: Number(monthlyFee) || studentToEdit.monthlyFee,
         planId: selectedPlanId ? selectedPlanId : null,
         effectiveCompetence: isPlanChanged ? effectiveCompetence : undefined,
@@ -1277,6 +1376,16 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     const studentId = `student-${Date.now()}`;
     const now = new Date().toISOString();
 
+    const studentAddress = {
+      street: street.trim(),
+      number: number.trim(),
+      complement: complement.trim() || undefined,
+      neighborhood: neighborhood.trim(),
+      city: city.trim() || 'São Paulo',
+      state: (state.trim() || 'SP').toUpperCase(),
+      zipCode: zipCode.trim(),
+    };
+
     const newPerson: Person = {
       id: studentPersonId,
       tenantId,
@@ -1287,14 +1396,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       gender,
       phone: phone || '',
       email: email || '',
-      address: {
-        street: 'Rua das Flores',
-        number: '123',
-        neighborhood: 'Centro',
-        city,
-        state: 'SP',
-        zipCode: '01000-000',
-      },
+      address: studentAddress,
       createdAt: now,
     };
 
@@ -1306,6 +1408,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       registrationNumber: `MAT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
       enrollmentDate: new Date().toISOString().split('T')[0],
       status: studentStatus,
+      address: studentAddress,
       currentGraduations: [
         {
           martialArtId: chosenArt.id,
@@ -1336,7 +1439,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         gender: 'other',
         phone: guardianPhone || phone || '',
         email: guardianEmail || '',
-        address: newPerson.address,
+        address: { street: '', number: '', neighborhood: '', city: 'São Paulo', state: 'SP', zipCode: '' },
         createdAt: now,
       };
 
@@ -1364,6 +1467,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       phone,
       email,
       city,
+      address: studentAddress,
       monthlyFee: Number(monthlyFee) || 220,
       planId: selectedPlanId ? selectedPlanId : null,
       martialArtId: selectedArtId,
@@ -1551,25 +1655,119 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div className="pt-1">
+              <label className="block text-slate-300 font-medium mb-1">E-mail do Aluno</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="aluno@email.com"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Seção: Endereço do aluno */}
+          <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="font-semibold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 text-red-400" />
+                <span>Endereço do aluno</span>
+              </div>
+              {guardianAddressAvailable && (
+                <button
+                  type="button"
+                  onClick={handleCopyGuardianAddress}
+                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 bg-slate-800/80 hover:bg-slate-700 px-2.5 py-1 rounded-md border border-slate-700 transition-colors cursor-pointer"
+                  title="Copiar dados de endereço do responsável para os campos do aluno (sem criar dependência ou vínculo)"
+                >
+                  <Copy className="h-3 w-3 text-red-400" />
+                  <span>Copiar endereço do responsável</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">E-mail do Aluno</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="aluno@email.com"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                <CepInput
+                  value={zipCode}
+                  onChange={setZipCode}
+                  onAddressResolved={(addr) => {
+                    if (addr.logradouro) setStreet(addr.logradouro);
+                    if (addr.bairro) setNeighborhood(addr.bairro);
+                    if (addr.localidade) setCity(addr.localidade);
+                    if (addr.uf) setState(addr.uf.toUpperCase());
+                  }}
+                  nextInputRef={numberInputRef}
+                  label="CEP"
                 />
               </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-slate-300 font-medium mb-1 text-xs">Logradouro</label>
+                <input
+                  type="text"
+                  value={street}
+                  onChange={(e) => setStreet(e.target.value)}
+                  placeholder="Ex: Rua das Palmeiras"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Cidade / Estado</label>
+                <label className="block text-slate-300 font-medium mb-1 text-xs">Número</label>
+                <input
+                  ref={numberInputRef}
+                  type="text"
+                  value={number}
+                  onChange={(e) => setNumber(e.target.value)}
+                  placeholder="123"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1 text-xs">Complemento</label>
+                <input
+                  type="text"
+                  value={complement}
+                  onChange={(e) => setComplement(e.target.value)}
+                  placeholder="Apto 42, Bloco B (Opcional)"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1 text-xs">Bairro</label>
+                <input
+                  type="text"
+                  value={neighborhood}
+                  onChange={(e) => setNeighborhood(e.target.value)}
+                  placeholder="Bairro"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-slate-300 font-medium mb-1 text-xs">Cidade ou município</label>
                 <input
                   type="text"
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
                   placeholder="São Paulo"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1 text-xs">UF</label>
+                <input
+                  type="text"
+                  maxLength={2}
+                  value={state}
+                  onChange={(e) => setState(e.target.value.toUpperCase())}
+                  placeholder="SP"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none uppercase"
                 />
               </div>
             </div>

@@ -858,13 +858,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     <div className="text-slate-400">E-mail: <span className="text-white">{activePerson.email}</span></div>
                   </div>
 
-                  <div className="p-3 rounded-lg border border-slate-800 bg-slate-950/60 space-y-2">
-                    <div className="font-semibold text-slate-300">Endereço Residencial:</div>
-                    <div className="text-slate-400">{activePerson.address?.street || '-'}, {activePerson.address?.number || 'S/N'}</div>
-                    <div className="text-slate-400">Bairro: {activePerson.address?.neighborhood || '-'}</div>
-                    <div className="text-slate-400">{activePerson.address?.city || 'São Paulo'} - {activePerson.address?.state || 'SP'}</div>
-                    <div className="text-slate-400 font-mono">CEP: {activePerson.address?.zipCode || '-'}</div>
-                  </div>
+                  {(() => {
+                    const studentAddress = selectedStudent.address || activePerson.address;
+                    return (
+                      <div className="p-3 rounded-lg border border-slate-800 bg-slate-950/60 space-y-2">
+                        <div className="font-semibold text-slate-300">Endereço Residencial:</div>
+                        <div className="text-slate-400">
+                          {studentAddress?.street || '-'}, {studentAddress?.number || 'S/N'}
+                          {studentAddress?.complement ? ` (${studentAddress.complement})` : ''}
+                        </div>
+                        <div className="text-slate-400">Bairro: {studentAddress?.neighborhood || '-'}</div>
+                        <div className="text-slate-400">{studentAddress?.city || 'São Paulo'} - {studentAddress?.state || 'SP'}</div>
+                        <div className="text-slate-400 font-mono">CEP: {studentAddress?.zipCode || '-'}</div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="sm:col-span-2 p-3.5 rounded-lg border border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div className="space-y-1">
