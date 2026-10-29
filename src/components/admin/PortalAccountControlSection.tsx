@@ -11,6 +11,7 @@ import {
   Activity,
   UserCheck,
   Lock,
+  Link2,
 } from 'lucide-react';
 import { portalAccessService, PortalAccountSummary } from '../../services/portalAccessService';
 import { Student, Person } from '../../types';
@@ -84,6 +85,19 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
     } finally {
       setLoading(false);
     }
+  };
+
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleCopyLink = (code: string) => {
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://tatameclub.com.br';
+    const link = `${origin}/?invite=${encodeURIComponent(code)}`;
+    navigator.clipboard?.writeText(link);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   const handleCopyCode = (code: string) => {
@@ -174,7 +188,7 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
             <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-300 block">
               Código de Convite Seguro (requer CPF {person.cpf || 'do titular'}):
             </span>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex flex-wrap items-center gap-2 mt-1.5">
               <code className="px-2.5 py-1 rounded bg-slate-900 border border-amber-500/40 text-amber-300 font-mono font-bold text-sm tracking-widest">
                 {summary.inviteCode}
               </code>
@@ -182,11 +196,41 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
                 type="button"
                 onClick={() => handleCopyCode(summary.inviteCode!)}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] transition-colors cursor-pointer"
+                title="Copiar código de ativação"
               >
                 {copiedCode ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                <span>{copiedCode ? 'Copiado!' : 'Copiar Código'}</span>
+                <span>{copiedCode ? 'Código Copiado!' : 'Copiar Código'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCopyLink(summary.inviteCode!)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] transition-colors cursor-pointer"
+                title="Copiar link direto para ativar o convite"
+              >
+                {copiedLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Link2 className="h-3.5 w-3.5" />}
+                <span>{copiedLink ? 'Link Copiado!' : 'Copiar Link'}</span>
               </button>
             </div>
+            {summary.lastEmailStatus && (
+              <div className="mt-2 text-[11px]">
+                {summary.lastEmailStatus === 'sent' && (
+                  <span className="text-emerald-400 font-medium inline-flex items-center gap-1">
+                    <Check className="h-3 w-3" />
+                    E-mail de ativação enviado para {summary.email}
+                  </span>
+                )}
+                {summary.lastEmailStatus === 'missing_config' && (
+                  <span className="text-amber-300/90 font-medium">
+                    ⚠️ Envio automático por e-mail desativado (segredo RESEND_API_KEY ausente no Supabase). Utilize o código ou link acima.
+                  </span>
+                )}
+                {summary.lastEmailStatus === 'failed' && (
+                  <span className="text-red-400 font-medium">
+                    ❌ Falha no envio do e-mail: {summary.lastEmailError || 'Erro no provedor.'}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

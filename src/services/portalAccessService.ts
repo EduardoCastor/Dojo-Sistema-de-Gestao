@@ -42,6 +42,27 @@ export interface PortalAccountInfo {
   pendingInviteCode?: string;
   inviteExpiresAt?: string;
   allowAnthropometryView?: boolean;
+  lastEmailSentAt?: string;
+  lastEmailStatus?: 'sent' | 'failed' | 'missing_config' | 'pending';
+  lastEmailError?: string;
+}
+
+export interface PortalInvitationVerification {
+  valid: boolean;
+  reason?: 'ready_to_claim' | 'not_found' | 'already_used' | 'revoked' | 'expired' | 'empty_code';
+  message: string;
+  invitationId?: string;
+  inviteCode?: string;
+  tenantId?: string;
+  academyName?: string;
+  role?: string;
+  fullName?: string;
+  email?: string;
+  maskedEmail?: string;
+  maskedCpf?: string;
+  requiresCpf?: boolean;
+  expiresAt?: string;
+  acceptedAt?: string;
 }
 
 export type PortalAccountSummary = PortalAccountInfo;
@@ -118,6 +139,9 @@ export const portalAccessService = {
         pendingInviteCode: pendingInvite?.inviteCode,
         inviteExpiresAt: pendingInvite?.expiresAt,
         allowAnthropometryView: Boolean(student?.allowAnthropometryView),
+        lastEmailSentAt: pendingInvite?.lastEmailSentAt,
+        lastEmailStatus: pendingInvite?.lastEmailStatus,
+        lastEmailError: pendingInvite?.lastEmailError,
       };
     } else {
       const persons = DataStore.getPersons(tenantId);
@@ -158,8 +182,228 @@ export const portalAccessService = {
         inviteCode: pendingInvite?.inviteCode,
         pendingInviteCode: pendingInvite?.inviteCode,
         inviteExpiresAt: pendingInvite?.expiresAt,
+        lastEmailSentAt: pendingInvite?.lastEmailSentAt,
+        lastEmailStatus: pendingInvite?.lastEmailStatus,
+        lastEmailError: pendingInvite?.lastEmailError,
       };
     }
+  },
+
+  /**
+   * Envia o e-mail de ativação com o código de convite e link direto via Supabase Edge Function / Resend.
+   */
+  async sendPortalInvitationEmail(params: {
+    tenantId: string;
+    invitationId?: string;
+    inviteCode: string;
+    recipientEmail: string;
+    recipientName: string;
+    targetType: 'student' | 'guardian';
+    targetId: string;
+    academyName?: string;
+  }): Promise<{
+    success: boolean;
+    emailSent: boolean;
+    status: 'sent' | 'failed' | 'missing_config' | 'pending';
+    error?: string;
+    messageId?: string;
+  }> {
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://tatameclub.com.br';
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.functions.invoke('send-portal-invitation-email', {
+          body: {
+            tenantId: params.tenantId,
+            invitationId: params.invitationId,
+            inviteCode: params.inviteCode,
+            recipientEmail: params.recipientEmail,
+            recipientName: params.recipientName,
+            targetType: params.targetType,
+            targetId: params.targetId,
+            academyName: params.academyName || 'Tatame Club',
+            appUrl: origin,
+          },
+        });
+
+        if (error) {
+          return {
+            success: false,
+            emailSent: false,
+            status: 'failed',
+            error: error.message || 'Falha ao acionar a Edge Function de e-mail.',
+          };
+        }
+
+        if (data?.code === 'MISSING_EMAIL_PROVIDER_SECRET') {
+          return {
+            success: false,
+            emailSent: false,
+            status: 'missing_config',
+            error: data.error,
+          };
+        }
+
+        if (data?.emailSent) {
+          return {
+            success: true,
+            emailSent: true,
+            status: 'sent',
+            messageId: data.messageId,
+          };
+        }
+
+        return {
+          success: false,
+          emailSent: false,
+          status: data?.code === 'MISSING_EMAIL_PROVIDER_SECRET' ? 'missing_config' : 'failed',
+          error: data?.error || 'Não foi possível entregar o e-mail de convite.',
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          emailSent: false,
+          status: 'failed',
+          error: err?.message || 'Falha na conexão com a Edge Function de e-mail.',
+        };
+      }
+    }
+
+    // Modo local / simulação para testes e ambientes locais
+    DataStore.logAudit(
+      params.tenantId,
+      'system',
+      'Serviço Transacional de E-mail',
+      'Envio de E-mail de Convite (Local/Simulado)',
+      params.targetType === 'student' ? 'Student' : 'Person',
+      params.targetId,
+      `E-mail de ativação com código ${params.inviteCode} despachado para ${params.recipientEmail}.`
+    );
+
+    return {
+      success: true,
+      emailSent: true,
+      status: 'sent',
+      messageId: `local-${Date.now()}`,
+    };
+  },
+
+  /**
+   * Pré-valida o código de convite antes do cadastro, retornando dados da academia e do aluno/responsável.
+   */
+  async verifyPortalInvitation(inviteCode: string): Promise<PortalInvitationVerification> {
+    const cleanCode = (inviteCode || '').replace(/\s+/g, '').toUpperCase();
+    if (!cleanCode) {
+      return {
+        valid: false,
+        reason: 'empty_code',
+        message: 'Informe o código de convite fornecido pela academia.',
+      };
+    }
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('verify_portal_invitation', {
+          p_invite_code: cleanCode,
+        });
+
+        if (!error && data) {
+          return data as PortalInvitationVerification;
+        }
+      } catch (err) {
+        // Fallback para DataStore caso a RPC ainda não esteja disponível no servidor
+      }
+    }
+
+    // Validação no DataStore
+    const allInvites = DataStore.getTenantInvitations();
+    const inv = allInvites.find(
+      (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+    );
+
+    if (!inv) {
+      return {
+        valid: false,
+        reason: 'not_found',
+        message: 'Código de convite não encontrado no sistema. Verifique a digitação ou solicite um novo envio à academia.',
+      };
+    }
+
+    const tenant = DataStore.getTenants().find((t) => t.id === inv.tenantId);
+    const academyName = tenant?.tradeName || tenant?.legalName || 'Tatame Club';
+
+    if (inv.status === 'accepted') {
+      return {
+        valid: false,
+        reason: 'already_used',
+        message: 'Este código de convite já foi utilizado e ativado anteriormente.',
+        academyName,
+        inviteCode: inv.inviteCode,
+      };
+    }
+
+    if (inv.status === 'revoked') {
+      return {
+        valid: false,
+        reason: 'revoked',
+        message: 'Este convite foi revogado pela administração da academia. Solicite um novo código à secretaria.',
+        academyName,
+        inviteCode: inv.inviteCode,
+      };
+    }
+
+    const isExpired = inv.status === 'expired' || new Date(inv.expiresAt).getTime() < Date.now();
+    if (isExpired) {
+      return {
+        valid: false,
+        reason: 'expired',
+        message: 'Este código de convite expirou. Solicite um novo código de ativação à secretaria da academia.',
+        academyName,
+        expiresAt: inv.expiresAt,
+        inviteCode: inv.inviteCode,
+      };
+    }
+
+    let personCpf = '';
+    if (inv.role === 'student' && inv.targetStudentId) {
+      const student = DataStore.getStudents(inv.tenantId).find((s) => s.id === inv.targetStudentId);
+      const person = student ? DataStore.getPersons(inv.tenantId).find((p) => p.id === student.personId) : undefined;
+      personCpf = cleanCPF(person?.cpf || '');
+    } else if (inv.role === 'guardian' && inv.targetGuardianPersonId) {
+      const person = DataStore.getPersons(inv.tenantId).find((p) => p.id === inv.targetGuardianPersonId);
+      personCpf = cleanCPF(person?.cpf || '');
+    }
+
+    let maskedCpf = '';
+    if (personCpf.length === 11) {
+      maskedCpf = `${personCpf.slice(0, 3)}.***.***-${personCpf.slice(9)}`;
+    }
+
+    let maskedEmail = inv.email;
+    if (inv.email.includes('@')) {
+      const [user, domain] = inv.email.split('@');
+      maskedEmail = `${user.slice(0, 2)}***@${domain}`;
+    }
+
+    return {
+      valid: true,
+      reason: 'ready_to_claim',
+      message: 'Convite válido e pronto para ativação.',
+      invitationId: inv.id,
+      inviteCode: inv.inviteCode,
+      tenantId: inv.tenantId,
+      academyName,
+      role: inv.role,
+      fullName: inv.fullName,
+      email: inv.email,
+      maskedEmail,
+      maskedCpf,
+      requiresCpf: Boolean(personCpf),
+      expiresAt: inv.expiresAt,
+    };
   },
 
   /**
@@ -189,6 +433,9 @@ export const portalAccessService = {
     inviteCode?: string;
     email?: string;
     allowAnthropometryView?: boolean;
+    emailSent?: boolean;
+    emailStatus?: 'sent' | 'failed' | 'missing_config' | 'pending';
+    emailError?: string;
   }> {
     const resolvedActor: User =
       params.actor ||
@@ -315,6 +562,24 @@ export const portalAccessService = {
           expiresAt: expires.toISOString(),
         };
 
+        const tenant = DataStore.getTenants().find((t) => t.id === params.tenantId);
+        const academyName = tenant?.tradeName || tenant?.legalName || 'Tatame Club';
+
+        const emailResult = await this.sendPortalInvitationEmail({
+          tenantId: params.tenantId,
+          invitationId: newInvite.id,
+          inviteCode,
+          recipientEmail: normalizedEmail,
+          recipientName: newInvite.fullName,
+          targetType: 'student',
+          targetId: student.id,
+          academyName,
+        });
+
+        newInvite.lastEmailSentAt = emailResult.emailSent ? new Date().toISOString() : undefined;
+        newInvite.lastEmailStatus = emailResult.status;
+        newInvite.lastEmailError = emailResult.error;
+
         DataStore.saveTenantInvitations([newInvite, ...updatedInvites]);
 
         allStudents[studentIdx] = {
@@ -330,16 +595,28 @@ export const portalAccessService = {
           normalizedAction === 'resend_invite' ? 'Reenvio de Convite Aluno' : 'Convite Portal do Aluno',
           'Student',
           student.id,
-          `Convite (${inviteCode}) gerado para ${newInvite.fullName} (${normalizedEmail}).`
+          `Convite (${inviteCode}) gerado para ${newInvite.fullName} (${normalizedEmail}). Status e-mail: ${emailResult.status}.`
         );
+
+        let userFeedbackMessage = `Convite gerado com sucesso! Código de ativação: ${inviteCode}`;
+        if (emailResult.emailSent) {
+          userFeedbackMessage = `Convite gerado e e-mail de ativação enviado com sucesso para ${normalizedEmail}! Código: ${inviteCode}`;
+        } else if (emailResult.status === 'missing_config') {
+          userFeedbackMessage = `Convite gerado! Código: ${inviteCode}. Aviso: O envio por e-mail está desativado (segredo RESEND_API_KEY não configurado no Supabase). Copie o código acima para fornecer ao aluno.`;
+        } else if (emailResult.error) {
+          userFeedbackMessage = `Convite gerado (Código: ${inviteCode}), mas o envio do e-mail falhou (${emailResult.error}). Copie o código para fornecer ao aluno.`;
+        }
 
         return {
           success: true,
-          message: `Convite gerado com sucesso! Código de ativação: ${inviteCode}`,
+          message: userFeedbackMessage,
           status: 'invited',
           portalAccessStatus: 'invited',
           inviteCode,
           email: normalizedEmail,
+          emailSent: emailResult.emailSent,
+          emailStatus: emailResult.status,
+          emailError: emailResult.error,
         };
       }
 
@@ -500,6 +777,24 @@ export const portalAccessService = {
           expiresAt: expires.toISOString(),
         };
 
+        const tenant = DataStore.getTenants().find((t) => t.id === params.tenantId);
+        const academyName = tenant?.tradeName || tenant?.legalName || 'Tatame Club';
+
+        const emailResult = await this.sendPortalInvitationEmail({
+          tenantId: params.tenantId,
+          invitationId: newInvite.id,
+          inviteCode,
+          recipientEmail: normalizedEmail,
+          recipientName: person.fullName,
+          targetType: 'guardian',
+          targetId: person.id,
+          academyName,
+        });
+
+        newInvite.lastEmailSentAt = emailResult.emailSent ? new Date().toISOString() : undefined;
+        newInvite.lastEmailStatus = emailResult.status;
+        newInvite.lastEmailError = emailResult.error;
+
         DataStore.saveTenantInvitations([newInvite, ...updatedInvites]);
 
         allPersons[personIdx] = {
@@ -518,16 +813,28 @@ export const portalAccessService = {
             : 'Convite Portal do Responsável',
           'Person',
           person.id,
-          `Convite (${inviteCode}) gerado para o responsável ${person.fullName} (${normalizedEmail}).`
+          `Convite (${inviteCode}) gerado para o responsável ${person.fullName} (${normalizedEmail}). Status e-mail: ${emailResult.status}.`
         );
+
+        let userFeedbackMessage = `Convite gerado para o responsável! Código de ativação: ${inviteCode}`;
+        if (emailResult.emailSent) {
+          userFeedbackMessage = `Convite gerado e e-mail de ativação enviado com sucesso para ${normalizedEmail}! Código: ${inviteCode}`;
+        } else if (emailResult.status === 'missing_config') {
+          userFeedbackMessage = `Convite gerado! Código: ${inviteCode}. Aviso: O envio por e-mail está desativado (segredo RESEND_API_KEY não configurado no Supabase). Copie o código acima para fornecer ao responsável.`;
+        } else if (emailResult.error) {
+          userFeedbackMessage = `Convite gerado (Código: ${inviteCode}), mas o envio do e-mail falhou (${emailResult.error}). Copie o código para fornecer ao responsável.`;
+        }
 
         return {
           success: true,
-          message: `Convite gerado para o responsável! Código de ativação: ${inviteCode}`,
+          message: userFeedbackMessage,
           status: 'invited',
           portalAccessStatus: 'invited',
           inviteCode,
           email: normalizedEmail,
+          emailSent: emailResult.emailSent,
+          emailStatus: emailResult.status,
+          emailError: emailResult.error,
         };
       }
 
@@ -678,26 +985,30 @@ export const portalAccessService = {
       name: params.userName,
     };
 
-    const normalizedCode = params.inviteCode.trim().toUpperCase();
+    const cleanCode = (params.inviteCode || '').replace(/\s+/g, '').toUpperCase();
     const cleanedInputCpf = cleanCPF(params.cpf || '');
     const normalizedAuthEmail = authUser.email.trim().toLowerCase();
 
-    if (!normalizedCode) {
+    if (!cleanCode) {
       throw new Error('Informe o código de convite fornecido pela sua academia.');
     }
 
     // 1. Se o Supabase estiver configurado, validar no servidor via RPC
     if (isSupabaseConfigured() && supabase && isValidUUID(authUser.id)) {
       const { data, error } = await supabase.rpc('claim_portal_invitation', {
-        p_invite_code: normalizedCode,
+        p_invite_code: cleanCode,
         p_cpf: cleanedInputCpf || null,
       });
 
       if (error && error.code !== '42883' && error.code !== 'PGRST202') {
-        throw new Error(error.message || 'Não foi possível validar o convite de acesso.');
-      }
-
-      if (data?.success) {
+        // Se falhou no Supabase, verificar se existe localmente no DataStore antes de falhar
+        const localExists = DataStore.getTenantInvitations().some(
+          (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+        );
+        if (!localExists) {
+          throw new Error(error.message || 'Não foi possível validar o convite de acesso.');
+        }
+      } else if (data?.success) {
         const linkedUser: User = {
           id: authUser.id,
           tenantId: data.tenant_id,
@@ -720,25 +1031,33 @@ export const portalAccessService = {
       }
     }
 
-    // 2. Validação transacional local
+    // 2. Validação transacional local (DataStore)
     const allInvites = DataStore.getTenantInvitations();
     const inviteIdx = allInvites.findIndex(
       (inv) =>
-        inv.inviteCode?.toUpperCase() === normalizedCode &&
-        inv.status === 'invited'
+        (inv.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
     );
 
     if (inviteIdx === -1) {
       throw new Error(
-        'Código de convite inválido, expirado ou revogado pela academia.'
+        'Código de convite não encontrado no sistema. Verifique a digitação ou solicite um novo envio à academia.'
       );
     }
 
     const invite = allInvites[inviteIdx];
-    if (new Date(invite.expiresAt).getTime() < Date.now()) {
+
+    if (invite.status === 'accepted') {
+      throw new Error('Este código de convite já foi utilizado e ativado anteriormente.');
+    }
+
+    if (invite.status === 'revoked') {
+      throw new Error('Este convite foi revogado pela administração da academia. Solicite um novo código à secretaria.');
+    }
+
+    if (invite.status === 'expired' || new Date(invite.expiresAt).getTime() < Date.now()) {
       allInvites[inviteIdx] = { ...invite, status: 'expired' };
       DataStore.saveTenantInvitations(allInvites);
-      throw new Error('Este convite expirou. Solicite um novo convite à secretaria da academia.');
+      throw new Error('Este convite expirou. Solicite um novo código à secretaria da sua academia.');
     }
 
     const allStudents = DataStore.getStudents();

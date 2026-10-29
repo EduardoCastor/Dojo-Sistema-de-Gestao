@@ -55,6 +55,7 @@ import {
 } from '../../services/financialService';
 import { supabase, isSupabaseConfigured } from '../../services/supabase';
 import { formDraftStore } from '../../utils/formDraftStore';
+import { PortalAccountControlSection } from './PortalAccountControlSection';
 
 interface StudentFormModalProps {
   isOpen: boolean;
@@ -2399,6 +2400,17 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
             )}
           </div>
         )}
+
+            {isEditing && studentToEdit && (
+              <div className="pt-2">
+                <PortalAccountControlSection
+                  tenantId={studentToEdit.tenantId || tenantId}
+                  targetType="student"
+                  student={studentToEdit}
+                  person={activePersonToEdit}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-3">

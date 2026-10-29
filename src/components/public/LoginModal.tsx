@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Lock,
@@ -12,10 +12,11 @@ import {
   UserCheck,
   UserPlus,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import { User as UserType } from '../../types';
 import { authService, isSupabaseConfigured, UserMembership } from '../../services/supabase';
-import { portalAccessService } from '../../services/portalAccessService';
+import { portalAccessService, PortalInvitationVerification } from '../../services/portalAccessService';
 import { DataStore } from '../../data/storage';
 import { formatCPF } from '../../utils/cpfValidator';
 
@@ -50,8 +51,51 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [inviteVerification, setInviteVerification] = useState<PortalInvitationVerification | null>(null);
+  const [isVerifyingInvite, setIsVerifyingInvite] = useState(false);
 
   const supabaseActive = isSupabaseConfigured();
+
+  const handleVerifyInviteCode = async (code: string) => {
+    const clean = (code || '').replace(/\s+/g, '').toUpperCase();
+    if (!clean || clean.length < 3) {
+      setInviteVerification(null);
+      return;
+    }
+    setIsVerifyingInvite(true);
+    try {
+      const res = await portalAccessService.verifyPortalInvitation(clean);
+      setInviteVerification(res);
+      if (res.valid) {
+        if (res.email && !email) setEmail(res.email);
+        if (res.fullName && !fullName) setFullName(res.fullName);
+      }
+    } catch (err: any) {
+      setInviteVerification({
+        valid: false,
+        reason: 'not_found',
+        message: err?.message || 'Código de convite não encontrado.',
+      });
+    } finally {
+      setIsVerifyingInvite(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const inviteFromUrl = urlParams.get('invite');
+      if (inviteFromUrl) {
+        const clean = inviteFromUrl.trim().toUpperCase();
+        setInviteCode(clean);
+        setAuthMode('claim_invite');
+        handleVerifyInviteCode(clean);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -168,7 +212,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               'student'
             );
             if (signUpErr || !signUpData.user) {
-              throw signInErr;
+              const errDetail =
+                signUpErr?.message ||
+                signInErr?.message ||
+                'Não foi possível criar as credenciais de acesso. Verifique os dados digitados.';
+              throw new Error(errDetail);
             }
             authenticatedUserId = signUpData.user.id;
             authenticatedUserEmail = signUpData.user.email || normalizedEmail;
@@ -436,14 +484,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-slate-300 font-semibold mb-1">Código do Convite *</label>
-                    <input
-                      type="text"
-                      required
-                      value={inviteCode}
-                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                      placeholder="Ex: A1B2C3D4"
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-amber-300 font-mono uppercase placeholder-slate-600 focus:border-red-500 focus:outline-none"
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        value={inviteCode}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase();
+                          setInviteCode(val);
+                          handleVerifyInviteCode(val);
+                        }}
+                        onBlur={() => handleVerifyInviteCode(inviteCode)}
+                        placeholder="Ex: AL-12AB34CD ou RP-12AB34CD"
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-amber-300 font-mono uppercase tracking-wider placeholder-slate-600 focus:border-red-500 focus:outline-none pr-8"
+                      />
+                      {isVerifyingInvite && (
+                        <div className="absolute right-2.5 top-2.5">
+                          <Loader2 className="h-4 w-4 text-amber-400 animate-spin" />
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-slate-300 font-semibold mb-1">CPF do Titular *</label>
@@ -458,6 +518,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     />
                   </div>
                 </div>
+
+                {inviteVerification && (
+                  <div
+                    className={`mt-2 p-2.5 rounded-lg border text-xs flex items-start gap-2 ${
+                      inviteVerification.valid
+                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200'
+                        : 'bg-red-950/60 border-red-500/40 text-red-200'
+                    }`}
+                  >
+                    {inviteVerification.valid ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      {inviteVerification.valid ? (
+                        <>
+                          <div className="font-semibold text-white">
+                            Convite Localizado — {inviteVerification.academyName}
+                          </div>
+                          <div className="text-[11px] text-emerald-300/90 mt-0.5">
+                            Titular: <strong className="text-white">{inviteVerification.fullName}</strong> ({inviteVerification.role === 'student' ? 'Aluno' : 'Responsável'})
+                            {inviteVerification.maskedCpf && (
+                              <span className="block text-[10px] text-slate-300 mt-0.5">
+                                CPF cadastrado na secretaria: {inviteVerification.maskedCpf}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="font-medium">{inviteVerification.message}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

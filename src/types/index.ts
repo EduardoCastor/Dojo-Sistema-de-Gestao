@@ -134,6 +134,9 @@ export interface TenantUserInvitation {
   invitedByName: string;
   createdAt: string;
   expiresAt: string;
+  lastEmailSentAt?: string;
+  lastEmailStatus?: 'sent' | 'failed' | 'missing_config' | 'pending';
+  lastEmailError?: string;
 }
 
 export interface LegalAcceptanceRecord {
