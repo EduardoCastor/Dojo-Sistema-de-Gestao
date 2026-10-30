@@ -230,11 +230,15 @@ export const portalAccessService = {
         });
 
         if (error) {
+          let errText = error.message || 'Falha ao acionar a Edge Function de e-mail.';
+          if (errText.includes('Failed to send a request to the Edge Function')) {
+            errText = 'Falha de conexão com a Edge Function de e-mail (send-portal-invitation-email). O código de convite continua ativo.';
+          }
           return {
             success: false,
             emailSent: false,
             status: 'failed',
-            error: error.message || 'Falha ao acionar a Edge Function de e-mail.',
+            error: errText,
           };
         }
 
@@ -263,11 +267,15 @@ export const portalAccessService = {
           error: data?.error || 'Não foi possível entregar o e-mail de convite.',
         };
       } catch (err: any) {
+        let errText = err?.message || 'Falha na conexão com a Edge Function de e-mail.';
+        if (errText.includes('Failed to send a request to the Edge Function')) {
+          errText = 'Falha de conexão com a Edge Function de e-mail (send-portal-invitation-email). O código de convite continua ativo.';
+        }
         return {
           success: false,
           emailSent: false,
           status: 'failed',
-          error: err?.message || 'Falha na conexão com a Edge Function de e-mail.',
+          error: errText,
         };
       }
     }
@@ -311,7 +319,15 @@ export const portalAccessService = {
         });
 
         if (!error && data) {
-          return data as PortalInvitationVerification;
+          if (data.valid || data.reason !== 'not_found') {
+            return data as PortalInvitationVerification;
+          }
+          const localExists = DataStore.getTenantInvitations().some(
+            (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+          );
+          if (!localExists) {
+            return data as PortalInvitationVerification;
+          }
         }
       } catch (err) {
         // Fallback para DataStore caso a RPC ainda não esteja disponível no servidor
@@ -417,6 +433,7 @@ export const portalAccessService = {
       | 'invite'
       | 'create_invite'
       | 'resend_invite'
+      | 'resend_email'
       | 'revoke_invite'
       | 'block'
       | 'revoke_access'
@@ -614,6 +631,98 @@ export const portalAccessService = {
           portalAccessStatus: 'invited',
           inviteCode,
           email: normalizedEmail,
+          emailSent: emailResult.emailSent,
+          emailStatus: emailResult.status,
+          emailError: emailResult.error,
+        };
+      }
+
+      if (normalizedAction === 'resend_email') {
+        const activeInvite = allInvites.find(
+          (inv) =>
+            inv.tenantId === params.tenantId &&
+            inv.targetStudentId === student.id &&
+            inv.status === 'invited'
+        );
+
+        if (!activeInvite) {
+          throw new Error('Nenhum convite pendente ativo encontrado para reenviar o e-mail do aluno.');
+        }
+
+        const targetEmail = (params.email || activeInvite.email || person?.email || '').trim().toLowerCase();
+        if (!targetEmail || !targetEmail.includes('@')) {
+          throw new Error('Endereço de e-mail inválido para reenvio.');
+        }
+
+        // Anti-spam / rate limit: impede reenvio se enviado com sucesso há menos de 60 segundos
+        if (activeInvite.lastEmailSentAt && activeInvite.lastEmailStatus === 'sent') {
+          const elapsedMs = Date.now() - new Date(activeInvite.lastEmailSentAt).getTime();
+          if (elapsedMs < 60_000) {
+            const waitSec = Math.ceil((60_000 - elapsedMs) / 1000);
+            return {
+              success: false,
+              message: `Um e-mail de ativação já foi enviado recentemente para ${activeInvite.email}. Aguarde ${waitSec} segundos para tentar novamente.`,
+              status: 'invited',
+              portalAccessStatus: 'invited',
+              inviteCode: activeInvite.inviteCode,
+              email: activeInvite.email,
+              emailSent: false,
+              emailStatus: activeInvite.lastEmailStatus,
+              emailError: activeInvite.lastEmailError,
+            };
+          }
+        }
+
+        const tenant = DataStore.getTenants().find((t) => t.id === params.tenantId);
+        const academyName = tenant?.tradeName || tenant?.legalName || 'Tatame Club';
+
+        const emailResult = await this.sendPortalInvitationEmail({
+          tenantId: params.tenantId,
+          invitationId: activeInvite.id,
+          inviteCode: activeInvite.inviteCode || '',
+          recipientEmail: targetEmail,
+          recipientName: activeInvite.fullName || person?.fullName || `Aluno ${student.registrationNumber}`,
+          targetType: 'student',
+          targetId: student.id,
+          academyName,
+        });
+
+        // Atualiza convite existente SEM alterar código de convite e SEM expirar
+        activeInvite.email = targetEmail;
+        if (emailResult.emailSent) {
+          activeInvite.lastEmailSentAt = new Date().toISOString();
+        }
+        activeInvite.lastEmailStatus = emailResult.status;
+        activeInvite.lastEmailError = emailResult.error;
+
+        DataStore.saveTenantInvitations(allInvites);
+
+        DataStore.logAudit(
+          params.tenantId,
+          resolvedActor.id,
+          resolvedActor.name,
+          'Reenvio de E-mail de Convite Aluno',
+          'Student',
+          student.id,
+          `Reenvio de e-mail de convite para ${targetEmail} com código ${activeInvite.inviteCode}. Status: ${emailResult.status}.`
+        );
+
+        let userFeedbackMessage = `Tentativa de envio de e-mail concluída. Código mantido: ${activeInvite.inviteCode}`;
+        if (emailResult.emailSent) {
+          userFeedbackMessage = `E-mail de ativação reenviado com sucesso para ${targetEmail}! Código mantido: ${activeInvite.inviteCode}`;
+        } else if (emailResult.status === 'missing_config') {
+          userFeedbackMessage = `O envio por e-mail está desativado (segredo RESEND_API_KEY não configurado no Supabase). O código ${activeInvite.inviteCode} continua ativo para fornecer ao aluno.`;
+        } else if (emailResult.error) {
+          userFeedbackMessage = `Falha ao reenviar o e-mail (${emailResult.error}). O código ativo permanece válido: ${activeInvite.inviteCode}. Copie-o abaixo para fornecer ao aluno.`;
+        }
+
+        return {
+          success: emailResult.emailSent,
+          message: userFeedbackMessage,
+          status: 'invited',
+          portalAccessStatus: 'invited',
+          inviteCode: activeInvite.inviteCode,
+          email: targetEmail,
           emailSent: emailResult.emailSent,
           emailStatus: emailResult.status,
           emailError: emailResult.error,
@@ -832,6 +941,96 @@ export const portalAccessService = {
           portalAccessStatus: 'invited',
           inviteCode,
           email: normalizedEmail,
+          emailSent: emailResult.emailSent,
+          emailStatus: emailResult.status,
+          emailError: emailResult.error,
+        };
+      }
+
+      if (normalizedAction === 'resend_email') {
+        const activeInvite = allInvites.find(
+          (inv) =>
+            inv.tenantId === params.tenantId &&
+            inv.targetGuardianPersonId === person.id &&
+            inv.status === 'invited'
+        );
+
+        if (!activeInvite) {
+          throw new Error('Nenhum convite pendente ativo encontrado para reenviar o e-mail do responsável.');
+        }
+
+        const targetEmail = (params.email || activeInvite.email || person.email || '').trim().toLowerCase();
+        if (!targetEmail || !targetEmail.includes('@')) {
+          throw new Error('Endereço de e-mail inválido para reenvio.');
+        }
+
+        if (activeInvite.lastEmailSentAt && activeInvite.lastEmailStatus === 'sent') {
+          const elapsedMs = Date.now() - new Date(activeInvite.lastEmailSentAt).getTime();
+          if (elapsedMs < 60_000) {
+            const waitSec = Math.ceil((60_000 - elapsedMs) / 1000);
+            return {
+              success: false,
+              message: `Um e-mail de ativação já foi enviado recentemente para ${activeInvite.email}. Aguarde ${waitSec} segundos para tentar novamente.`,
+              status: 'invited',
+              portalAccessStatus: 'invited',
+              inviteCode: activeInvite.inviteCode,
+              email: activeInvite.email,
+              emailSent: false,
+              emailStatus: activeInvite.lastEmailStatus,
+              emailError: activeInvite.lastEmailError,
+            };
+          }
+        }
+
+        const tenant = DataStore.getTenants().find((t) => t.id === params.tenantId);
+        const academyName = tenant?.tradeName || tenant?.legalName || 'Tatame Club';
+
+        const emailResult = await this.sendPortalInvitationEmail({
+          tenantId: params.tenantId,
+          invitationId: activeInvite.id,
+          inviteCode: activeInvite.inviteCode || '',
+          recipientEmail: targetEmail,
+          recipientName: activeInvite.fullName || person.fullName,
+          targetType: 'guardian',
+          targetId: person.id,
+          academyName,
+        });
+
+        activeInvite.email = targetEmail;
+        if (emailResult.emailSent) {
+          activeInvite.lastEmailSentAt = new Date().toISOString();
+        }
+        activeInvite.lastEmailStatus = emailResult.status;
+        activeInvite.lastEmailError = emailResult.error;
+
+        DataStore.saveTenantInvitations(allInvites);
+
+        DataStore.logAudit(
+          params.tenantId,
+          resolvedActor.id,
+          resolvedActor.name,
+          'Reenvio de E-mail de Convite Responsável',
+          'Person',
+          person.id,
+          `Reenvio de e-mail de convite para ${targetEmail} com código ${activeInvite.inviteCode}. Status: ${emailResult.status}.`
+        );
+
+        let userFeedbackMessage = `Tentativa de envio de e-mail concluída. Código mantido: ${activeInvite.inviteCode}`;
+        if (emailResult.emailSent) {
+          userFeedbackMessage = `E-mail de ativação reenviado com sucesso para ${targetEmail}! Código mantido: ${activeInvite.inviteCode}`;
+        } else if (emailResult.status === 'missing_config') {
+          userFeedbackMessage = `O envio por e-mail está desativado (segredo RESEND_API_KEY não configurado no Supabase). O código ${activeInvite.inviteCode} continua ativo para fornecer ao responsável.`;
+        } else if (emailResult.error) {
+          userFeedbackMessage = `Falha ao reenviar o e-mail (${emailResult.error}). O código ativo permanece válido: ${activeInvite.inviteCode}. Copie-o abaixo para fornecer ao responsável.`;
+        }
+
+        return {
+          success: emailResult.emailSent,
+          message: userFeedbackMessage,
+          status: 'invited',
+          portalAccessStatus: 'invited',
+          inviteCode: activeInvite.inviteCode,
+          email: targetEmail,
           emailSent: emailResult.emailSent,
           emailStatus: emailResult.status,
           emailError: emailResult.error,

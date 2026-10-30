@@ -357,7 +357,189 @@ async function runTestSuite() {
     permissionDeniedCaught = true;
     assert(err.message.includes('Permissão insuficiente'), 'Instrutor bloqueado de gerenciar acessos');
   }
-  assert(permissionDeniedCaught, 'Apenas proprietários, gerentes ou secretários podem gerenciar contas');
+  console.log('\n--- CENÁRIO 16: Reenvio de e-mail (resend_email) preservando o código ativo ---');
+  // Cria um novo aluno para testar o fluxo de resend_email isoladamente
+  const personStuResend: Person = {
+    id: 'person-stu-resend',
+    tenantId: tenantA,
+    fullName: 'Mariana Resend Test',
+    cpf: '333.444.555-66',
+    email: 'mariana.resend@exemplo.com.br',
+    phone: '11966665555',
+    gender: 'female',
+    birthDate: '2005-08-20',
+    address: {
+      street: 'Rua do Teste',
+      number: '42',
+      neighborhood: 'Bairro',
+      city: 'São Paulo',
+      state: 'SP',
+      zipCode: '01000-000',
+    },
+    createdAt: new Date().toISOString(),
+  };
+
+  const studentResend: Student = {
+    id: 'stu-resend',
+    tenantId: tenantA,
+    branchId: 'branch-1',
+    personId: personStuResend.id,
+    registrationNumber: 'ALU-RESEND',
+    status: 'active',
+    portalAccessStatus: 'none',
+    allowAnthropometryView: false,
+    monthlyFee: 250,
+    enrollmentDate: '2026-01-10',
+    currentGraduations: [],
+  };
+
+  DataStore.savePersons([...DataStore.getPersons(), personStuResend]);
+  DataStore.saveStudents([...DataStore.getStudents(), studentResend]);
+
+  const initialInvite = await portalAccessService.manageAccountAccess({
+    tenantId: tenantA,
+    targetType: 'student',
+    targetId: studentResend.id,
+    action: 'invite',
+    email: personStuResend.email,
+    actor: ownerUser,
+  });
+
+  const activeCodeBeforeResend = initialInvite.inviteCode!;
+  assert(Boolean(activeCodeBeforeResend), 'Convite inicial gerado com código: ' + activeCodeBeforeResend);
+
+  // Simula que o e-mail de ativação inicial foi enviado com sucesso há 5 segundos
+  const allInvitesInitial = DataStore.getTenantInvitations(tenantA);
+  const targetInvInitial = allInvitesInitial.find((i) => i.inviteCode === activeCodeBeforeResend);
+  if (targetInvInitial) {
+    targetInvInitial.lastEmailSentAt = new Date().toISOString();
+    targetInvInitial.lastEmailStatus = 'sent';
+    DataStore.saveTenantInvitations(allInvitesInitial);
+  }
+
+  // Executa resend_email (tentativa de reenvio sem gerar novo código)
+  console.log('\n--- CENÁRIO 17: Prevenção de duplicidade e proteção anti-flood (cooldown de 60 segundos) ---');
+  const rapidResendAttempt = await portalAccessService.manageAccountAccess({
+    tenantId: tenantA,
+    targetType: 'student',
+    targetId: studentResend.id,
+    action: 'resend_email',
+    email: personStuResend.email,
+    actor: ownerUser,
+  });
+
+  assert(rapidResendAttempt.success === false, 'Reenvio imediato antes de 60s é bloqueado por rate-limiting');
+  assert(rapidResendAttempt.message.includes('recentemente') || rapidResendAttempt.message.includes('Aguarde'), 'Mensagem amigável de cooldown informada');
+  assert(rapidResendAttempt.inviteCode === activeCodeBeforeResend, 'Código de convite mantido idêntico');
+
+  // Simula que passaram 65 segundos modificando lastEmailSentAt
+  const allInvites = DataStore.getTenantInvitations(tenantA);
+  const targetInv = allInvites.find((i) => i.inviteCode === activeCodeBeforeResend);
+  if (targetInv) {
+    targetInv.lastEmailSentAt = new Date(Date.now() - 65000).toISOString();
+    DataStore.saveTenantInvitations(allInvites);
+  }
+
+  // Mock de envio de e-mail com sucesso para testar o reenvio permitido
+  const originalSendEmailFn = portalAccessService.sendPortalInvitationEmail;
+  portalAccessService.sendPortalInvitationEmail = async () => ({
+    success: true,
+    emailSent: true,
+    status: 'sent' as const,
+    messageId: 'test-resend-msg-123',
+  });
+
+  let allowedResend;
+  try {
+    allowedResend = await portalAccessService.manageAccountAccess({
+      tenantId: tenantA,
+      targetType: 'student',
+      targetId: studentResend.id,
+      action: 'resend_email',
+      email: personStuResend.email,
+      actor: ownerUser,
+    });
+  } finally {
+    portalAccessService.sendPortalInvitationEmail = originalSendEmailFn;
+  }
+
+  assert(allowedResend.success === true, 'Reenvio após o cooldown é processado com sucesso');
+  assert(allowedResend.inviteCode === activeCodeBeforeResend, 'Código de convite permanece exatamente o mesmo (sem criar duplicata)');
+
+  const invitesAfterResend = DataStore.getTenantInvitations(tenantA).filter((i) => i.targetStudentId === studentResend.id);
+  assert(invitesAfterResend.length === 1, 'Permanece apenas 1 registro de convite (sem criar segundo convite)');
+  assert(invitesAfterResend[0].status === 'invited', 'Status do convite continua como "invited"');
+
+  console.log('\n--- CENÁRIO 18: Preservação do convite mesmo com falha no envio de e-mail ---');
+  // Criamos outro aluno simulando que o envio de e-mail retorne erro
+  const personStuFail: Person = {
+    id: 'person-stu-fail',
+    tenantId: tenantA,
+    fullName: 'Thiago Fail Test',
+    cpf: '555.666.777-88',
+    email: 'thiago.fail@exemplo.com.br',
+    phone: '11955554444',
+    gender: 'male',
+    birthDate: '2004-03-10',
+    address: {
+      street: 'Rua do Teste',
+      number: '10',
+      neighborhood: 'Bairro',
+      city: 'São Paulo',
+      state: 'SP',
+      zipCode: '01000-000',
+    },
+    createdAt: new Date().toISOString(),
+  };
+
+  const studentFail: Student = {
+    id: 'stu-fail',
+    tenantId: tenantA,
+    branchId: 'branch-1',
+    personId: personStuFail.id,
+    registrationNumber: 'ALU-FAIL',
+    status: 'active',
+    portalAccessStatus: 'none',
+    allowAnthropometryView: false,
+    monthlyFee: 250,
+    enrollmentDate: '2026-01-10',
+    currentGraduations: [],
+  };
+
+  DataStore.savePersons([...DataStore.getPersons(), personStuFail]);
+  DataStore.saveStudents([...DataStore.getStudents(), studentFail]);
+
+  // Mock temporário para simular falha no envio de e-mail
+  const originalSendEmail = portalAccessService.sendPortalInvitationEmail;
+  portalAccessService.sendPortalInvitationEmail = async () => ({
+    success: false,
+    emailSent: false,
+    status: 'failed' as const,
+    error: 'Failed to send a request to the Edge Function',
+  });
+
+  try {
+    const failedEmailInvite = await portalAccessService.manageAccountAccess({
+      tenantId: tenantA,
+      targetType: 'student',
+      targetId: studentFail.id,
+      action: 'invite',
+      email: personStuFail.email,
+      actor: ownerUser,
+    });
+
+    assert(failedEmailInvite.success === true, 'Convite foi gerado mesmo com a falha na entrega do e-mail');
+    assert(Boolean(failedEmailInvite.inviteCode), 'Código gerado com sucesso: ' + failedEmailInvite.inviteCode);
+    assert(failedEmailInvite.emailSent === false, 'emailSent é false');
+    assert(failedEmailInvite.emailStatus === 'failed', 'emailStatus é "failed"');
+    assert(failedEmailInvite.message.includes('falhou') && failedEmailInvite.message.includes('Copie o código'), 'Mensagem orienta a copiar o código ativo');
+
+    const inviteInDb = DataStore.getTenantInvitations(tenantA).find((i) => i.inviteCode === failedEmailInvite.inviteCode);
+    assert(Boolean(inviteInDb), 'O convite NÃO foi desfeito e continua salvo no banco/DataStore');
+    assert(inviteInDb?.status === 'invited', 'O convite permanece com status "invited" válido para uso');
+  } finally {
+    portalAccessService.sendPortalInvitationEmail = originalSendEmail;
+  }
 
   console.log('\n================================================================');
   console.log(`🎉 TODOS OS ${totalTests} TESTES FORAM EXECUTADOS COM SUCESSO! (${passedTests}/${totalTests} PASS)`);

@@ -37,7 +37,11 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
   );
   const [inviteEmail, setInviteEmail] = useState(person.email || '');
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'warning' | 'error';
+    message: string;
+    code?: string;
+  } | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
 
   useEffect(() => {
@@ -50,6 +54,7 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
     action:
       | 'create_invite'
       | 'resend_invite'
+      | 'resend_email'
       | 'revoke_invite'
       | 'block'
       | 'revoke_access'
@@ -69,18 +74,29 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
         allowAnthropometry,
       });
 
-      setSummary(portalAccessService.getPortalAccountStatus(tenantId, targetType, targetId));
+      const updatedSummary = portalAccessService.getPortalAccountStatus(tenantId, targetType, targetId);
+      setSummary(updatedSummary);
+
+      let feedbackType: 'success' | 'warning' | 'error' = 'success';
+      if (!res.success) {
+        feedbackType = 'error';
+      } else if (res.status === 'invited' && res.emailSent === false) {
+        feedbackType = 'warning';
+      }
+
       setFeedback({
-        type: res.success ? 'success' : 'error',
+        type: feedbackType,
         message: res.message,
+        code: res.inviteCode || updatedSummary.inviteCode,
       });
+
       if (res.success && onUpdated) {
         onUpdated();
       }
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'Não foi possível atualizar o acesso ao portal.',
+        message: err?.message || 'Falha na operação de convite ou acesso ao portal.',
       });
     } finally {
       setLoading(false);
@@ -166,29 +182,58 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
 
       {feedback && (
         <div
-          className={`p-2.5 rounded-lg border text-[11px] flex items-center gap-2 ${
+          className={`p-3 rounded-lg border text-[11px] flex items-start gap-2.5 ${
             feedback.type === 'success'
               ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+              : feedback.type === 'warning'
+              ? 'bg-amber-950/60 border-amber-500/50 text-amber-200'
               : 'bg-red-950/50 border-red-500/40 text-red-200'
           }`}
         >
           {feedback.type === 'success' ? (
-            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+          ) : feedback.type === 'warning' ? (
+            <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
           ) : (
-            <ShieldAlert className="h-4 w-4 text-red-400 shrink-0" />
+            <Ban className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
           )}
-          <span>{feedback.message}</span>
+          <div className="space-y-1">
+            <p className="font-semibold text-xs">
+              {feedback.type === 'success'
+                ? 'Convite criado e e-mail enviado com sucesso'
+                : feedback.type === 'warning'
+                ? 'Convite ativo gerado (envio de e-mail pendente ou falhou)'
+                : 'Falha na operação de convite ou acesso'}
+            </p>
+            <p className="text-[11px] opacity-90">{feedback.message}</p>
+            {feedback.code && feedback.type === 'warning' && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-[10px] text-amber-300 font-medium">Código ativo para entrega manual:</span>
+                <code className="px-2 py-0.5 rounded bg-slate-900 border border-amber-500/40 text-amber-300 font-mono font-bold text-xs">
+                  {feedback.code}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => handleCopyCode(feedback.code!)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] inline-flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  {copiedCode ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  <span>{copiedCode ? 'Copiado!' : 'Copiar Código'}</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Convite ativo / Código para ativação */}
       {summary.status === 'invited' && summary.inviteCode && (
-        <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
+        <div className="p-3.5 rounded-lg bg-amber-950/30 border border-amber-500/30 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
+          <div className="space-y-1.5">
             <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-300 block">
               Código de Convite Seguro (requer CPF {person.cpf || 'do titular'}):
             </span>
-            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               <code className="px-2.5 py-1 rounded bg-slate-900 border border-amber-500/40 text-amber-300 font-mono font-bold text-sm tracking-widest">
                 {summary.inviteCode}
               </code>
@@ -212,7 +257,7 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
               </button>
             </div>
             {summary.lastEmailStatus && (
-              <div className="mt-2 text-[11px]">
+              <div className="text-[11px] pt-0.5">
                 {summary.lastEmailStatus === 'sent' && (
                   <span className="text-emerald-400 font-medium inline-flex items-center gap-1">
                     <Check className="h-3 w-3" />
@@ -233,21 +278,33 @@ export const PortalAccountControlSection: React.FC<PortalAccountControlSectionPr
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleAction('resend_email')}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-200 font-semibold text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+              title="Tentar enviar o e-mail novamente mantendo o mesmo código de convite já gerado"
+            >
+              <Mail className="h-3.5 w-3.5" />
+              <span>Tentar Enviar E-mail</span>
+            </button>
             <button
               type="button"
               disabled={loading}
               onClick={() => handleAction('resend_invite')}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-200 font-semibold text-[11px] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-200 font-semibold text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+              title="Expira o código atual e gera um novo código de convite"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span>Reenviar Convite</span>
+              <span>Gerar Novo Código</span>
             </button>
             <button
               type="button"
               disabled={loading}
               onClick={() => handleAction('revoke_invite')}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900/60 border border-red-500/40 text-red-300 font-semibold text-[11px] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900/60 border border-red-500/40 text-red-300 font-semibold text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+              title="Cancela e revoga o convite pendente"
             >
               <Ban className="h-3.5 w-3.5" />
               <span>Cancelar Convite</span>
