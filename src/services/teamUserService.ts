@@ -23,6 +23,17 @@ export const ALLOWED_TENANT_ROLES: Exclude<UserRole, 'superadmin'>[] = [
 
 export const ALLOWED_ACADEMY_ROLES = ALLOWED_TENANT_ROLES;
 
+/** Papéis de equipe, distintos dos vínculos de acesso aos portais de aluno e responsável. */
+export type StaffTenantRole = Exclude<UserRole, 'superadmin' | 'student' | 'guardian'>;
+
+export const STAFF_TENANT_ROLES: StaffTenantRole[] = [
+  'owner',
+  'branch_manager',
+  'secretary',
+  'financial',
+  'instructor',
+];
+
 export const ROLE_LABELS: Record<Exclude<UserRole, 'superadmin'>, string> = {
   owner: 'Proprietário / Sensei Titular',
   branch_manager: 'Gestor de Filial',
@@ -61,7 +72,7 @@ export interface CreateTenantUserPayload {
   name: string;
   email: string;
   phone?: string;
-  role: UserRole;
+  role: StaffTenantRole;
   mode?: 'direct_active' | 'invite';
 }
 
@@ -72,7 +83,7 @@ export interface UpdateTenantUserPayload {
   email?: string;
   phone?: string;
   branchId?: string;
-  role?: UserRole;
+  role?: StaffTenantRole;
   active?: boolean;
 }
 
@@ -81,6 +92,12 @@ function assertValidTenantRoleFn(role: UserRole): asserts role is Exclude<UserRo
     throw new Error(
       `Papel inválido ou proibido ("${role}"): administradores de academias não podem conceder privilégios globais de SuperAdmin.`
     );
+  }
+}
+
+function assertStaffTenantRole(role: UserRole): asserts role is StaffTenantRole {
+  if (!STAFF_TENANT_ROLES.includes(role as StaffTenantRole)) {
+    throw new Error('Aluno e responsável recebem acesso pelos convites do Portal, não pelo gerenciamento da equipe.');
   }
 }
 
@@ -123,7 +140,9 @@ export const teamUserService = {
   getTenantUsers(tenantId: string): User[] {
     if (!tenantId || tenantId === 'platform') return [];
     const all = DataStore.getAllUsers();
-    return all.filter((u) => u.tenantId === tenantId && u.role !== 'superadmin');
+    return all.filter(
+      (u) => u.tenantId === tenantId && STAFF_TENANT_ROLES.includes(u.role as StaffTenantRole)
+    );
   },
 
   getActiveUsersCount(tenantId: string): number {
@@ -131,7 +150,9 @@ export const teamUserService = {
   },
 
   getTenantInvitations(tenantId: string): TenantUserInvitation[] {
-    return DataStore.getTenantInvitations(tenantId);
+    return DataStore.getTenantInvitations(tenantId).filter((inv) =>
+      STAFF_TENANT_ROLES.includes(inv.role as StaffTenantRole)
+    );
   },
 
   /**
@@ -144,7 +165,7 @@ export const teamUserService = {
   ): Promise<{ user?: User; invitation?: TenantUserInvitation }> {
     return withTenantLock(payload.tenantId, async () => {
       this.assertActorCanManageTenantUsers(actor, payload.tenantId);
-      assertValidTenantRoleFn(payload.role);
+      assertStaffTenantRole(payload.role);
 
       // branch_manager não pode criar outro owner
       if (actor.role === 'branch_manager' && payload.role === 'owner') {
@@ -281,6 +302,7 @@ export const teamUserService = {
     if (invite.status !== 'invited') {
       throw new Error(`Este convite não está mais pendente (status atual: ${invite.status}).`);
     }
+    assertStaffTenantRole(invite.role);
 
     return withTenantLock(invite.tenantId, async () => {
       this.assertActorCanManageTenantUsers(actor, invite.tenantId);
@@ -370,9 +392,10 @@ export const teamUserService = {
       }
 
       const target = allUsers[targetIndex];
+      assertStaffTenantRole(target.role);
 
       if (payload.role !== undefined) {
-        this.assertValidTenantRole(payload.role);
+        assertStaffTenantRole(payload.role);
         if (actor.role === 'branch_manager' && (target.role === 'owner' || payload.role === 'owner')) {
           throw new Error('Apenas o Proprietário (owner) pode alterar permissões de Proprietário.');
         }
@@ -455,7 +478,12 @@ export const teamUserService = {
 
       const allUsers = DataStore.getAllUsers();
       const prevIdx = allUsers.findIndex((u) => u.id === currentOwnerId && u.tenantId === tenantId);
-      const nextIdx = allUsers.findIndex((u) => u.id === newOwnerId && u.tenantId === tenantId);
+      const nextIdx = allUsers.findIndex(
+        (u) =>
+          u.id === newOwnerId &&
+          u.tenantId === tenantId &&
+          STAFF_TENANT_ROLES.includes(u.role as StaffTenantRole)
+      );
 
       if (prevIdx === -1 || nextIdx === -1) {
         throw new Error('Ambos os usuários devem pertencer à mesma academia.');

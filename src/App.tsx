@@ -465,7 +465,19 @@ export default function App() {
     memberships: UserMembership[],
     options?: { preserveNavigation?: boolean }
   ) => {
-    const primary = memberships[0];
+    const rolePriority: Record<UserMembership['role'], number> = {
+      owner: 0,
+      branch_manager: 1,
+      secretary: 2,
+      financial: 3,
+      instructor: 4,
+      student: 5,
+      guardian: 6,
+    };
+    const orderedMemberships = [...memberships].sort(
+      (a, b) => rolePriority[a.role] - rolePriority[b.role]
+    );
+    const primary = orderedMemberships[0];
     if (!primary) return;
 
     activeSessionUserIdRef.current = user.id;
@@ -510,7 +522,7 @@ export default function App() {
       });
     }
 
-    const sameTenantMemberships = memberships.filter((m) => m.tenant_id === primary.tenant_id);
+    const sameTenantMemberships = orderedMemberships.filter((m) => m.tenant_id === primary.tenant_id);
     const secondaryRoles = sameTenantMemberships.slice(1).map((m) => ({
       role: m.role,
       studentId: m.student_id || undefined,

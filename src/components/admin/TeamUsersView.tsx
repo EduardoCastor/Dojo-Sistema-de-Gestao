@@ -15,7 +15,12 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { User, Branch, Tenant, UserRole, TenantUserInvitation } from '../../types';
-import { teamUserService, ALLOWED_TENANT_ROLES, ROLE_LABELS } from '../../services/teamUserService';
+import {
+  teamUserService,
+  STAFF_TENANT_ROLES,
+  ROLE_LABELS,
+  StaffTenantRole,
+} from '../../services/teamUserService';
 import { saasPlatformService } from '../../services/saasPlatformService';
 
 interface TeamUsersViewProps {
@@ -26,14 +31,6 @@ interface TeamUsersViewProps {
   onOpenPlanUpgrade?: () => void;
   onUserUpdated?: () => void;
 }
-
-const STAFF_ROLES: Exclude<UserRole, 'superadmin' | 'student' | 'guardian'>[] = [
-  'owner',
-  'branch_manager',
-  'instructor',
-  'secretary',
-  'financial',
-];
 
 export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
   tenant,
@@ -53,7 +50,7 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
   // Invite form state
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<Exclude<UserRole, 'superadmin'>>('instructor');
+  const [inviteRole, setInviteRole] = useState<StaffTenantRole>('instructor');
   const [inviteBranchId, setInviteBranchId] = useState<string>(
     currentUser.role === 'branch_manager' && currentUser.branchId
       ? currentUser.branchId
@@ -164,7 +161,7 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
     }
   };
 
-  const handleChangeRole = async (targetUser: User, newRole: Exclude<UserRole, 'superadmin'>) => {
+  const handleChangeRole = async (targetUser: User, newRole: StaffTenantRole) => {
     setFeedback(null);
     try {
       await teamUserService.updateTenantUser(
@@ -409,7 +406,7 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
             className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
           >
             <option value="staff">Equipe da Academia (Staff)</option>
-            <option value="all">Todos os vínculos</option>
+            <option value="all">Todos os papéis da equipe</option>
             <option value="owner">Proprietários (Owner)</option>
             <option value="branch_manager">Gestores de Unidade</option>
             <option value="instructor">Instrutores / Professores</option>
@@ -422,9 +419,10 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
       {/* Active / Inactive Users Table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white">Membros Vinculados à Academia ({filteredUsers.length})</h3>
+          <h3 className="text-sm font-bold text-white">Equipe da Academia ({filteredUsers.length})</h3>
           <span className="text-[11px] text-zinc-400">
-            Isolamento Multi-Tenant Ativo • Tenant ID: <code className="text-zinc-300">{tenant.id}</code>
+            Alunos e responsáveis gerenciam o acesso em seus respectivos portais • Tenant ID:{' '}
+            <code className="text-zinc-300">{tenant.id}</code>
           </span>
         </div>
 
@@ -481,11 +479,11 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
                         <select
                           value={memberRole}
                           onChange={(e) =>
-                            handleChangeRole(member, e.target.value as Exclude<UserRole, 'superadmin'>)
+                            handleChangeRole(member, e.target.value as StaffTenantRole)
                           }
                           className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500"
                         >
-                          {STAFF_ROLES.filter((r) => isOwner || (r !== 'owner' && r !== 'branch_manager')).map(
+                          {STAFF_TENANT_ROLES.filter((r) => isOwner || (r !== 'owner' && r !== 'branch_manager')).map(
                             (roleKey) => (
                               <option key={roleKey} value={roleKey}>
                                 {ROLE_LABELS[roleKey]}
@@ -654,14 +652,11 @@ export const TeamUsersView: React.FC<TeamUsersViewProps> = ({
                 <label className="block text-xs font-medium text-zinc-300 mb-1">Papel / Nível de Permissão</label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as Exclude<UserRole, 'superadmin'>)}
+                  onChange={(e) => setInviteRole(e.target.value as StaffTenantRole)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-500"
                 >
-                  {ALLOWED_TENANT_ROLES.filter(
-                    (r) =>
-                      r !== 'student' &&
-                      r !== 'guardian' &&
-                      (isOwner || (r !== 'owner' && r !== 'branch_manager'))
+                  {STAFF_TENANT_ROLES.filter(
+                    (r) => isOwner || (r !== 'owner' && r !== 'branch_manager')
                   ).map((roleKey) => (
                     <option key={roleKey} value={roleKey}>
                       {ROLE_LABELS[roleKey]}
