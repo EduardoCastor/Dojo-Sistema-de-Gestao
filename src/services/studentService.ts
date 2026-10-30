@@ -1499,8 +1499,12 @@ export const studentService = {
           enrollment_date,
           status,
           monthly_fee,
+          plan_id,
           notes,
           address,
+          user_id,
+          portal_access_status,
+          allow_anthropometry_view,
           created_at,
           person:persons (
             id,
@@ -1513,6 +1517,8 @@ export const studentService = {
             phone,
             email,
             address,
+            user_id,
+            portal_access_status,
             created_at
           )
         `)
@@ -1574,9 +1580,12 @@ export const studentService = {
           gender: (p.gender as any) || 'male',
           phone: p.phone || '',
           email: p.email || '',
+          userId: p.user_id || undefined,
+          portalAccessStatus: (p.portal_access_status as any) || 'none',
           address: {
             street: p.address?.street || '',
             number: p.address?.number || '',
+            complement: p.address?.complement || undefined,
             neighborhood: p.address?.neighborhood || '',
             city: p.address?.city || '',
             state: p.address?.state || 'SP',
@@ -1602,9 +1611,12 @@ export const studentService = {
             gender: (p.gender as any) || 'male',
             phone: p.phone || '',
             email: p.email || '',
+            userId: p.user_id || undefined,
+            portalAccessStatus: (p.portal_access_status as any) || 'none',
             address: {
               street: p.address?.street || '',
               number: p.address?.number || '',
+              complement: p.address?.complement || undefined,
               neighborhood: p.address?.neighborhood || '',
               city: p.address?.city || '',
               state: p.address?.state || 'SP',
@@ -1648,6 +1660,9 @@ export const studentService = {
           monthlyFee: Number(row.monthly_fee) || 0,
           planId: row.plan_id || undefined,
           notes: row.notes || undefined,
+          userId: row.user_id || undefined,
+          portalAccessStatus: (row.portal_access_status as any) || 'none',
+          allowAnthropometryView: Boolean(row.allow_anthropometry_view),
           address: row.address && Object.keys(row.address).length > 0
             ? row.address
             : (personMap.get(row.person_id)?.address || undefined),
@@ -1666,6 +1681,11 @@ export const studentService = {
         isPickupAuthorized: Boolean(row.is_pickup_authorized),
         notes: row.notes || undefined,
       }));
+
+      // Sincronizar cache local com dados reais do banco
+      DataStore.saveStudents(loadedStudents);
+      DataStore.savePersons(loadedPersons);
+      DataStore.saveGuardianRelationships(loadedGuardians);
 
       return {
         students: loadedStudents,

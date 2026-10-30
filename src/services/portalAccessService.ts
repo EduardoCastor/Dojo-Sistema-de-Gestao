@@ -1218,6 +1218,49 @@ export const portalAccessService = {
           studentId: data.student_id || undefined,
           guardianPersonId: data.guardian_person_id || undefined,
         };
+
+        // Sincronizar cache local com o resultado confirmado do servidor
+        const allUsers = DataStore.getAllUsers();
+        const updatedUsers = [linkedUser, ...allUsers.filter((u) => u.id !== linkedUser.id)];
+        DataStore.saveUsers(updatedUsers);
+
+        if (data.role === 'student' && data.student_id) {
+          const allStudents = DataStore.getStudents();
+          const sIdx = allStudents.findIndex((s) => s.id === data.student_id);
+          if (sIdx >= 0) {
+            allStudents[sIdx] = {
+              ...allStudents[sIdx],
+              userId: linkedUser.id,
+              portalAccessStatus: 'active',
+            };
+            DataStore.saveStudents(allStudents);
+
+            const allPersons = DataStore.getPersons();
+            const pIdx = allPersons.findIndex((p) => p.id === allStudents[sIdx].personId);
+            if (pIdx >= 0) {
+              allPersons[pIdx] = {
+                ...allPersons[pIdx],
+                userId: linkedUser.id,
+                portalAccessStatus: 'active',
+              };
+              DataStore.savePersons(allPersons);
+            }
+          }
+        }
+
+        const allInvites = DataStore.getTenantInvitations();
+        const invIdx = allInvites.findIndex(
+          (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+        );
+        if (invIdx >= 0) {
+          allInvites[invIdx] = {
+            ...allInvites[invIdx],
+            status: 'accepted',
+            acceptedAt: new Date().toISOString(),
+          };
+          DataStore.saveTenantInvitations(allInvites);
+        }
+
         return {
           success: true,
           message: 'Convite validado e conta vinculada com sucesso!',
@@ -1474,10 +1517,20 @@ export const portalAccessService = {
       };
     }
 
+    const studentIdFromSecondary = user.secondaryRoles
+      ?.map((r) => (typeof r === 'object' && r.role === 'student' ? r.studentId : undefined))
+      .find(Boolean);
+    const effectiveStudentId = user.studentId || studentIdFromSecondary;
+
+    const guardianPersonIdFromSecondary = user.secondaryRoles
+      ?.map((r) => (typeof r === 'object' && r.role === 'guardian' ? r.guardianPersonId : undefined))
+      .find(Boolean);
+    const effectiveGuardianPersonId = user.guardianPersonId || guardianPersonIdFromSecondary;
+
     // 1. Verificar vínculo de Aluno (priorizando studentId explícito, ou userId no mesmo tenant)
     const candidateStudent =
-      (user.studentId
-        ? students.find((s) => s.tenantId === tenantId && s.id === user.studentId)
+      (effectiveStudentId
+        ? students.find((s) => s.tenantId === tenantId && s.id === effectiveStudentId)
         : undefined) ||
       students.find((s) => s.tenantId === tenantId && s.userId && s.userId === user.id);
 
@@ -1498,14 +1551,15 @@ export const portalAccessService = {
         ownStudent = candidateStudent;
         ownStudentPerson =
           persons.find((p) => p.id === candidateStudent.personId && p.tenantId === tenantId) ||
+          persons.find((p) => p.userId === user.id && p.tenantId === tenantId) ||
           null;
       }
     }
 
     // 2. Verificar vínculo de Responsável (priorizando guardianPersonId explícito, ou pessoa com userId que possua vínculo em guardians)
     let candidateGuardianPerson =
-      (user.guardianPersonId
-        ? persons.find((p) => p.tenantId === tenantId && p.id === user.guardianPersonId)
+      (effectiveGuardianPersonId
+        ? persons.find((p) => p.tenantId === tenantId && p.id === effectiveGuardianPersonId)
         : undefined) ||
       persons.find(
         (p) =>
@@ -1787,14 +1841,20 @@ export const portalAccessService = {
       if (item.accessScope === 'public' || item.accessScope === 'tenant_all' || item.allBelts) {
         return true;
       }
-      if (item.accessScope === 'restricted_belt') {
+      if (
+        item.accessScope === 'restricted_belt' ||
+        (!item.allBelts && item.targetBeltIds && item.targetBeltIds.length > 0)
+      ) {
         if (item.martialArtId) {
           const stuBeltId = studentGradMap.get(item.martialArtId);
           if (!stuBeltId) return false;
           if (!item.targetBeltIds || item.targetBeltIds.length === 0) return true;
           return item.targetBeltIds.includes(stuBeltId);
         }
-        return true;
+        if (item.targetBeltIds && item.targetBeltIds.length > 0) {
+          return Array.from(studentGradMap.values()).some((bId) => item.targetBeltIds!.includes(bId));
+        }
+        return false;
       }
       return true;
     });

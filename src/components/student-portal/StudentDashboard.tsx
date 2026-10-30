@@ -155,6 +155,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     setSavingProfile(true);
     try {
       const res = await portalAccessService.updateOwnStudentPersonalInfo({
+        actor: {
+          id: student.userId || `stu-user-${student.id}`,
+          tenantId: student.tenantId,
+          name: person.fullName,
+          email: email.trim() || person.email || '',
+          role: 'student',
+          active: true,
+          studentId: student.id,
+        },
         tenantId: student.tenantId,
         studentId: student.id,
         personId: person.id,

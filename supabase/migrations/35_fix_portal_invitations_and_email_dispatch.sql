@@ -128,7 +128,8 @@ BEGIN
     );
   END IF;
 
-  SELECT name, trading_name INTO v_tenant
+  -- Consulta correta com trade_name e legal_name
+  SELECT trade_name, legal_name INTO v_tenant
   FROM public.tenants
   WHERE id = v_inv.tenant_id;
 
@@ -170,7 +171,7 @@ BEGIN
       'reason', 'already_used',
       'message', 'Este código de convite já foi utilizado e ativado anteriormente.',
       'accepted_at', v_inv.accepted_at,
-      'academy_name', COALESCE(v_tenant.trading_name, v_tenant.name, 'Tatame Club')
+      'academy_name', COALESCE(NULLIF(trim(v_tenant.trade_name), ''), NULLIF(trim(v_tenant.legal_name), ''), 'Tatame Club')
     );
   END IF;
 
@@ -180,7 +181,7 @@ BEGIN
       'valid', false,
       'reason', 'revoked',
       'message', 'Este convite foi revogado pela administração da academia. Solicite um novo código à secretaria.',
-      'academy_name', COALESCE(v_tenant.trading_name, v_tenant.name, 'Tatame Club')
+      'academy_name', COALESCE(NULLIF(trim(v_tenant.trade_name), ''), NULLIF(trim(v_tenant.legal_name), ''), 'Tatame Club')
     );
   END IF;
 
@@ -196,7 +197,7 @@ BEGIN
       'reason', 'expired',
       'message', 'Este código de convite expirou. Solicite um novo código de ativação à secretaria da academia.',
       'expires_at', v_inv.expires_at,
-      'academy_name', COALESCE(v_tenant.trading_name, v_tenant.name, 'Tatame Club')
+      'academy_name', COALESCE(NULLIF(trim(v_tenant.trade_name), ''), NULLIF(trim(v_tenant.legal_name), ''), 'Tatame Club')
     );
   END IF;
 
@@ -208,7 +209,7 @@ BEGIN
     'invitation_id', v_inv.id,
     'invite_code', v_inv.invite_code,
     'tenant_id', v_inv.tenant_id,
-    'academy_name', COALESCE(v_tenant.trading_name, v_tenant.name, 'Tatame Club'),
+    'academy_name', COALESCE(NULLIF(trim(v_tenant.trade_name), ''), NULLIF(trim(v_tenant.legal_name), ''), 'Tatame Club'),
     'role', v_inv.role,
     'full_name', v_inv.full_name,
     'email', v_inv.email,
@@ -269,7 +270,8 @@ BEGIN
       USING ERRCODE = 'P0002';
   END IF;
 
-  SELECT name, trading_name INTO v_tenant
+  -- Consulta correta com trade_name e legal_name
+  SELECT trade_name, legal_name INTO v_tenant
   FROM public.tenants
   WHERE id = v_inv.tenant_id;
 
@@ -410,7 +412,7 @@ BEGIN
     'tenant_id', v_inv.tenant_id,
     'student_id', v_inv.target_student_id,
     'guardian_person_id', v_inv.target_guardian_person_id,
-    'academy_name', COALESCE(v_tenant.trading_name, v_tenant.name, 'Tatame Club')
+    'academy_name', COALESCE(NULLIF(trim(v_tenant.trade_name), ''), NULLIF(trim(v_tenant.legal_name), ''), 'Tatame Club')
   );
 END;
 $$;

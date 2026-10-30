@@ -252,7 +252,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         }
 
         if (supabaseActive) {
-          const memberships = await authService.loadUserMemberships(authenticatedUserId);
+          let memberships = await authService.loadUserMemberships(authenticatedUserId);
+          if (memberships.length === 0 && claimRes.tenantId) {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            memberships = await authService.loadUserMemberships(authenticatedUserId);
+          }
+          if (memberships.length === 0 && claimRes.tenantId) {
+            const tenantSettings = await authService.fetchTenantSettings(claimRes.tenantId);
+            const fallbackMembership: UserMembership = {
+              id: `mem-${Date.now()}`,
+              tenant_id: claimRes.tenantId,
+              role: claimRes.role,
+              status: 'active',
+              student_id: claimRes.studentId || null,
+              guardian_person_id: claimRes.guardianPersonId || null,
+              tenant: tenantSettings
+                ? {
+                    id: tenantSettings.id,
+                    trade_name: tenantSettings.tradeName,
+                    legal_name: tenantSettings.legalName,
+                    cnpj_or_cpf: tenantSettings.cnpjOrCpf,
+                    plan_id: tenantSettings.planId,
+                    status: tenantSettings.status,
+                    settings: tenantSettings.settings,
+                  }
+                : null,
+            };
+            memberships = [fallbackMembership];
+          }
+
           if (onAuthSuccess) {
             onAuthSuccess(
               {

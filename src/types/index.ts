@@ -137,6 +137,8 @@ export interface TenantUserInvitation {
   lastEmailSentAt?: string;
   lastEmailStatus?: 'sent' | 'failed' | 'missing_config' | 'pending';
   lastEmailError?: string;
+  acceptedAt?: string;
+  acceptedByUserId?: string;
 }
 
 export interface LegalAcceptanceRecord {

@@ -527,7 +527,9 @@ export default function App() {
 
     setUsers((prev) => {
       const filtered = prev.filter((u) => u.id !== user.id);
-      return [authenticatedUser, ...filtered];
+      const next = [authenticatedUser, ...filtered];
+      DataStore.saveUsers(next);
+      return next;
     });
 
     setCurrentTenantId(primary.tenant_id);
@@ -1675,11 +1677,23 @@ export default function App() {
           currentUser={{ ...currentUser, role: 'student' }}
           tenant={activeTenant}
           canSwitchPortalRole={(() => {
-            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const ctx = portalAccessService.resolveAuthorizedPortalContext({
+              user: currentUser,
+              tenantId: activeTenant.id,
+              students,
+              persons,
+              guardians,
+            });
             return ctx.hasDualPortalRole;
           })()}
           onSwitchPersona={() => {
-            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const ctx = portalAccessService.resolveAuthorizedPortalContext({
+              user: currentUser,
+              tenantId: activeTenant.id,
+              students,
+              persons,
+              guardians,
+            });
             if (ctx.hasDualPortalRole) {
               setCurrentView('guardian_portal');
             } else {
@@ -1691,14 +1705,23 @@ export default function App() {
           onOpenPrivacy={() => openLegalModal('privacy')}
         >
           {(() => {
-            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const ctx = portalAccessService.resolveAuthorizedPortalContext({
+              user: currentUser,
+              tenantId: activeTenant.id,
+              students,
+              persons,
+              guardians,
+            });
             const currentStudent =
               ctx.studentRecord ||
               students.find((s) => s.id === currentUser.studentId && s.tenantId === activeTenant.id) ||
+              students.find((s) => s.userId === currentUser.id && s.tenantId === activeTenant.id) ||
               null;
             const currentPerson =
               ctx.studentPerson ||
-              (currentStudent ? persons.find((p) => p.id === currentStudent.personId) || null : null);
+              (currentStudent ? persons.find((p) => p.id === currentStudent.personId) || null : null) ||
+              persons.find((p) => p.userId === currentUser.id && p.tenantId === activeTenant.id) ||
+              null;
             return (
               <StudentDashboard
                 student={currentStudent}
@@ -1727,11 +1750,23 @@ export default function App() {
           currentUser={{ ...currentUser, role: 'guardian' }}
           tenant={activeTenant}
           canSwitchPortalRole={(() => {
-            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const ctx = portalAccessService.resolveAuthorizedPortalContext({
+              user: currentUser,
+              tenantId: activeTenant.id,
+              students,
+              persons,
+              guardians,
+            });
             return ctx.hasDualPortalRole;
           })()}
           onSwitchPersona={() => {
-            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const ctx = portalAccessService.resolveAuthorizedPortalContext({
+              user: currentUser,
+              tenantId: activeTenant.id,
+              students,
+              persons,
+              guardians,
+            });
             if (ctx.hasDualPortalRole) {
               setCurrentView('student_portal');
             } else {
@@ -1743,10 +1778,17 @@ export default function App() {
           onOpenPrivacy={() => openLegalModal('privacy')}
         >
           {(() => {
-            const ctx = portalAccessService.resolveAuthorizedPortalContext(currentUser, activeTenant.id);
+            const ctx = portalAccessService.resolveAuthorizedPortalContext({
+              user: currentUser,
+              tenantId: activeTenant.id,
+              students,
+              persons,
+              guardians,
+            });
             const guardianPerson =
               ctx.guardianPerson ||
               persons.find((p) => p.id === currentUser.guardianPersonId && p.tenantId === activeTenant.id) ||
+              persons.find((p) => p.userId === currentUser.id && p.tenantId === activeTenant.id) ||
               null;
             return (
               <GuardianPortal
