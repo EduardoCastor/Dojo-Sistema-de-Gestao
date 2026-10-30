@@ -135,14 +135,17 @@ Para corrigir o erro `invalid input value for enum tenant_status: "expired" (SQL
 
 ---
 
-## 10. Aplicação das Migrations 37 e 38 (Validação de Convites, Portal do Aluno e Sessão Auth)
+## 10. Aplicação das Migrations 35, 36, 37 e 38 (Convites e Acesso aos Portais)
 
-Para garantir o funcionamento pleno da validação de links diretos de convites (como `https://www.tatameclub.com.br/?invite=AL-WQA5MR64`), associação segura com CPF e criação de conta de alunos e responsáveis sem erros de autenticação ou código não encontrado:
+A geração de convite (`manage_portal_account_access`), a validação (`verify_portal_invitation`) e a ativação (`claim_portal_invitation`) precisam existir no mesmo projeto Supabase usado pelo site. Sem isso, o sistema deve interromper a operação em vez de enviar um código sem registro persistido.
 
-1. No **SQL Editor** do Supabase (`https://supabase.com/dashboard/project/knmzzndugadmklzzgtaa/sql/new`):
-2. Execute integralmente o script `supabase/migrations/38_fix_portal_invitation_claim_and_auth_session.sql`.
-3. O script aplica:
-   - Normalização de espaços e hífens (`[\s\-]+`) nas RPCs `public.verify_portal_invitation` e `public.claim_portal_invitation`, garantindo que códigos como `AL-WQA5MR64` e `ALWQA5MR64` sejam reconhecidos igualmente.
-   - Suporte ao parâmetro opcional `p_user_id` na RPC `public.claim_portal_invitation(p_invite_code, p_cpf, p_user_id)`, permitindo vincular o convite imediatamente à conta recém-criada mesmo antes da propagação do JWT no cliente.
-   - Sobrecarga com 2 parâmetros para manter compatibilidade reversa total com versões anteriores.
-   - Concessão de permissões de execução para `anon, authenticated, service_role` com `SECURITY DEFINER` e `search_path = public, auth`.
+No **SQL Editor** do Supabase (`https://supabase.com/dashboard/project/knmzzndugadmklzzgtaa/sql/new`), verifique/aplique os scripts em ordem:
+
+1. `supabase/migrations/35_fix_portal_invitations_and_email_dispatch.sql`
+2. `supabase/migrations/36_fix_portal_invitation_resend_email_and_rate_limit.sql` — cria o RPC que persiste o convite antes do envio do e-mail.
+3. `supabase/migrations/37_fix_student_portal_auth_and_rls.sql`
+4. `supabase/migrations/38_fix_portal_invitation_claim_and_auth_session.sql`
+
+Depois, recarregue o schema do PostgREST com `NOTIFY pgrst, 'reload schema';` (as migrations também emitem esse sinal quando aplicável). Convites que foram enviados enquanto o RPC 36 não estava disponível podem existir apenas no navegador que os criou; gere um novo convite depois que as migrations estiverem aplicadas.
+
+A migration 38 normaliza espaços e hífens nas RPCs de validação/ativação e permite `p_user_id` para vincular a nova conta mesmo antes da propagação do JWT. As RPCs devem ficar acessíveis conforme os grants do script e executadas com `SECURITY DEFINER` e `search_path = public, auth`.

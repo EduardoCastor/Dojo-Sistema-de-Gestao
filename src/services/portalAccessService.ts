@@ -49,7 +49,7 @@ export interface PortalAccountInfo {
 
 export interface PortalInvitationVerification {
   valid: boolean;
-  reason?: 'ready_to_claim' | 'not_found' | 'already_used' | 'revoked' | 'expired' | 'empty_code';
+  reason?: 'ready_to_claim' | 'not_found' | 'already_used' | 'revoked' | 'expired' | 'empty_code' | 'service_unavailable';
   message: string;
   invitationId?: string;
   inviteCode?: string;
@@ -313,65 +313,53 @@ export const portalAccessService = {
       };
     }
 
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured()) {
+      if (!supabase) return { valid: false, reason: 'service_unavailable', message: 'O serviço de validação de convites não está disponível. Tente novamente mais tarde.' };
       try {
-        // Tenta buscar no Supabase pelo código original e pelo normalizado
-        let rpcRes = await supabase.rpc('verify_portal_invitation', {
-          p_invite_code: rawClean,
-        });
-
-        if ((rpcRes.error || !rpcRes.data?.valid) && rawClean !== cleanWithoutHyphen) {
-          const retryRes = await supabase.rpc('verify_portal_invitation', {
-            p_invite_code: cleanWithoutHyphen,
-          });
-          if (!retryRes.error && retryRes.data?.valid) {
-            rpcRes = retryRes;
-          }
+        let rpcRes = await supabase.rpc('verify_portal_invitation', { p_invite_code: rawClean });
+        if ((rpcRes.error || !rpcRes.data) && rawClean !== cleanWithoutHyphen) {
+          const retryRes = await supabase.rpc('verify_portal_invitation', { p_invite_code: cleanWithoutHyphen });
+          if (!retryRes.error && retryRes.data) rpcRes = retryRes;
         }
-
-        if (!rpcRes.error && rpcRes.data) {
-          const d = rpcRes.data as any;
-          if (d.valid || d.reason !== 'not_found') {
-            return {
-              valid: Boolean(d.valid),
-              reason: d.reason,
-              message: d.message || 'Código verificado com sucesso.',
-              invitationId: d.invitation_id || d.invitationId,
-              inviteCode: d.invite_code || d.inviteCode || rawClean,
-              tenantId: d.tenant_id || d.tenantId,
-              academyName: d.academy_name || d.academyName || 'Tatame Club',
-              role: d.role,
-              fullName: d.full_name || d.fullName,
-              email: d.email,
-              maskedEmail: d.masked_email || d.maskedEmail,
-              maskedCpf: d.masked_cpf || d.maskedCpf,
-              requiresCpf: d.requires_cpf !== undefined ? Boolean(d.requires_cpf) : Boolean(d.requiresCpf),
-              expiresAt: d.expires_at || d.expiresAt,
-              acceptedAt: d.accepted_at || d.acceptedAt,
-            };
-          }
-
-          // Se a RPC respondeu formalmente que o convite não existe no Supabase,
-          // verifica se existe localmente no mock DataStore antes de retornar not_found
-          const localExists = DataStore.getTenantInvitations().some(
-            (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanWithoutHyphen
-          );
-          if (!localExists) {
-            return {
-              valid: false,
-              reason: 'not_found',
-              message: d.message || 'Código de convite não encontrado no sistema. Verifique a digitação ou solicite um novo envio à academia.',
-            };
-          }
-        } else if (rpcRes.error && rpcRes.error.code !== '42883' && rpcRes.error.code !== 'PGRST202') {
+        if (rpcRes.error) {
           console.warn('Erro ao verificar convite no Supabase:', rpcRes.error);
+          const rpcMissing = rpcRes.error.code === '42883' || rpcRes.error.code === 'PGRST202';
+          return {
+            valid: false,
+            reason: 'service_unavailable',
+            message: rpcMissing
+              ? 'A validação de convites não está configurada no banco da academia. A equipe responsável precisa aplicar as migrations 35 a 38 do projeto.'
+              : 'Não foi possível consultar o convite no banco da academia. Tente novamente mais tarde.',
+          };
         }
+        if (!rpcRes.data) return { valid: false, reason: 'service_unavailable', message: 'O banco da academia não retornou uma resposta de validação. Tente novamente mais tarde.' };
+        const d = rpcRes.data as any;
+        return {
+          valid: Boolean(d.valid),
+          reason: d.reason,
+          message: d.message || 'Código verificado com sucesso.',
+          invitationId: d.invitation_id || d.invitationId,
+          inviteCode: d.invite_code || d.inviteCode || rawClean,
+          tenantId: d.tenant_id || d.tenantId,
+          academyName: d.academy_name || d.academyName || 'Tatame Club',
+          role: d.role,
+          fullName: d.full_name || d.fullName,
+          email: d.email,
+          maskedEmail: d.masked_email || d.maskedEmail,
+          maskedCpf: d.masked_cpf || d.maskedCpf,
+          requiresCpf: d.requires_cpf !== undefined ? Boolean(d.requires_cpf) : Boolean(d.requiresCpf),
+          expiresAt: d.expires_at || d.expiresAt,
+          acceptedAt: d.accepted_at || d.acceptedAt,
+        };
       } catch (err) {
         console.warn('Falha na chamada de verificação de convite:', err);
+        return { valid: false, reason: 'service_unavailable', message: 'Não foi possível consultar o convite no banco da academia. Tente novamente mais tarde.' };
       }
     }
 
-    // Validação no DataStore local (fallback para ambiente offline ou teste)
+    // Validação no DataStore local somente quando o Supabase não está configurado
+
+
     const allInvites = DataStore.getTenantInvitations();
     const inv = allInvites.find(
       (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanWithoutHyphen
@@ -511,28 +499,32 @@ export const portalAccessService = {
 
     let remoteInviteCode: string | undefined;
 
-    if (
-      isSupabaseConfigured() &&
-      supabase &&
-      isValidUUID(params.tenantId) &&
-      isValidUUID(params.targetId)
-    ) {
+    if (isSupabaseConfigured()) {
+      if (!supabase) throw new Error('O Supabase está configurado, mas o cliente de banco não está disponível.');
+      if (!isValidUUID(params.tenantId) || !isValidUUID(params.targetId)) {
+        throw new Error('Não foi possível localizar os identificadores reais da academia e do cadastro para gravar o convite.');
+      }
       const { data, error } = await supabase.rpc('manage_portal_account_access', {
         p_tenant_id: params.tenantId,
         p_target_type: params.targetType,
         p_target_id: params.targetId,
         p_action: normalizedAction,
         p_email: params.email?.trim().toLowerCase() || null,
-        p_allow_anthropometry:
-          params.allowAnthropometry !== undefined ? params.allowAnthropometry : null,
+        p_allow_anthropometry: params.allowAnthropometry !== undefined ? params.allowAnthropometry : null,
       });
-
-      if (error && error.code !== '42883' && error.code !== 'PGRST202') {
-        throw new Error(error.message || 'Falha ao gerenciar conta de acesso no Supabase.');
+      if (error) {
+        const rpcMissing = error.code === '42883' || error.code === 'PGRST202';
+        throw new Error(
+          rpcMissing
+            ? 'O serviço de convites do portal não está instalado no banco da academia. Aplique a migration 36 antes de gerar ou reenviar convites.'
+            : error.message || 'Falha ao gerenciar conta de acesso no Supabase.'
+        );
       }
-      if (data?.invite_code) {
-        remoteInviteCode = data.invite_code;
+      if (data?.success === false) throw new Error(data.message || 'O banco não confirmou a operação de acesso ao portal.');
+      if (['invite', 'resend_invite'].includes(normalizedAction) && !data?.invite_code) {
+        throw new Error('O banco não confirmou a gravação do convite. Nenhum e-mail foi enviado.');
       }
+      if (data?.invite_code) remoteInviteCode = data.invite_code;
     }
 
     const allStudents = DataStore.getStudents();
@@ -1231,7 +1223,10 @@ export const portalAccessService = {
     }
 
     // 1. Se o Supabase estiver configurado, validar no servidor via RPC
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured()) {
+      if (!supabase) {
+        throw new Error('O serviço de ativação do portal não está disponível no momento.');
+      }
       const targetUserId = isValidUUID(authUser.id) ? authUser.id : null;
 
       // Tenta chamar com 3 parâmetros (incluindo p_user_id para casos de signUp recente)
@@ -1268,16 +1263,12 @@ export const portalAccessService = {
       const { data, error } = rpcRes;
 
       if (error) {
-        // Se a função realmente não existir no banco (42883/PGRST202) e o convite existir localmente no DataStore
-        const localExists = DataStore.getTenantInvitations().some(
-          (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanCode
+        const rpcMissing = error.code === '42883' || error.code === 'PGRST202';
+        throw new Error(
+          rpcMissing
+            ? 'O serviço de ativação do portal não está instalado no banco da academia. Aplique as migrations 37 e 38 antes de vincular a conta.'
+            : error.message || 'Não foi possível validar o convite de acesso.'
         );
-        if (localExists && (error.code === '42883' || error.code === 'PGRST202')) {
-          // Continua para o fallback do DataStore local
-        } else {
-          // Lança o erro real do banco de dados (ex: CPF incorreto, sessão ausente, convite já usado)
-          throw new Error(error.message || 'Não foi possível validar o convite de acesso.');
-        }
       } else if (data?.success) {
         const linkedUser: User = {
           id: authUser.id,
@@ -1342,9 +1333,10 @@ export const portalAccessService = {
           guardianPersonId: data.guardian_person_id,
         };
       }
+      throw new Error('O banco não confirmou a ativação do convite. Nenhum vínculo local foi criado.');
     }
 
-    // 2. Validação transacional local (DataStore)
+    // 2. Validação transacional local (DataStore) somente quando o Supabase não está configurado
     const allInvites = DataStore.getTenantInvitations();
     const inviteIdx = allInvites.findIndex(
       (inv) =>
