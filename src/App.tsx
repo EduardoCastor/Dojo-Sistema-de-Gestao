@@ -465,14 +465,16 @@ export default function App() {
     memberships: UserMembership[],
     options?: { preserveNavigation?: boolean }
   ) => {
+    // Quando a conta tem acesso ao portal e também vínculos antigos de equipe,
+    // prioriza o destino de portal para não encaminhar o aluno ao painel administrativo.
     const rolePriority: Record<UserMembership['role'], number> = {
-      owner: 0,
-      branch_manager: 1,
-      secretary: 2,
-      financial: 3,
-      instructor: 4,
-      student: 5,
-      guardian: 6,
+      student: 0,
+      guardian: 1,
+      owner: 2,
+      branch_manager: 3,
+      secretary: 4,
+      financial: 5,
+      instructor: 6,
     };
     const orderedMemberships = [...memberships].sort(
       (a, b) => rolePriority[a.role] - rolePriority[b.role]
