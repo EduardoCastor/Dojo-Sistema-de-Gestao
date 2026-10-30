@@ -57,24 +57,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const supabaseActive = isSupabaseConfigured();
 
   const handleVerifyInviteCode = async (code: string) => {
-    const clean = (code || '').replace(/\s+/g, '').toUpperCase();
+    const raw = (code || '').trim().toUpperCase();
+    const clean = raw.replace(/[\s\-]/g, '');
     if (!clean || clean.length < 3) {
       setInviteVerification(null);
       return;
     }
     setIsVerifyingInvite(true);
     try {
-      const res = await portalAccessService.verifyPortalInvitation(clean);
+      const res = await portalAccessService.verifyPortalInvitation(raw);
       setInviteVerification(res);
       if (res.valid) {
         if (res.email && !email) setEmail(res.email);
         if (res.fullName && !fullName) setFullName(res.fullName);
+        setError(null);
       }
     } catch (err: any) {
       setInviteVerification({
         valid: false,
         reason: 'not_found',
-        message: err?.message || 'Código de convite não encontrado.',
+        message: err?.message || 'Código de convite não encontrado no sistema.',
       });
     } finally {
       setIsVerifyingInvite(false);
@@ -192,41 +194,76 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           setLoading(false);
           return;
         }
+        if (!normalizedEmail || !password) {
+          setError('Informe seu e-mail e crie uma senha de acesso para vincular ao convite.');
+          setLoading(false);
+          return;
+        }
 
         let authenticatedUserId = '';
         let authenticatedUserEmail = normalizedEmail;
         let authenticatedUserName = fullName.trim();
+        let hasActiveSession = false;
 
         if (supabaseActive) {
-          // Autentica ou cria a conta no Supabase antes de vincular o convite
-          const { data: signInData, error: signInErr } = await authService.signInWithEmail(
-            normalizedEmail,
-            password
-          );
-          if (signInErr) {
-            // Tenta criar a conta caso ainda não exista
-            const { data: signUpData, error: signUpErr } = await authService.signUp(
+          // 1. Verifica se já existe uma sessão ativa
+          const activeSession = await authService.getSession();
+          if (activeSession?.user) {
+            authenticatedUserId = activeSession.user.id;
+            authenticatedUserEmail = activeSession.user.email || normalizedEmail;
+            authenticatedUserName =
+              activeSession.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
+            hasActiveSession = true;
+          } else {
+            // 2. Tenta autenticar caso o usuário já possua conta criada
+            const { data: signInData, error: signInErr } = await authService.signInWithEmail(
               normalizedEmail,
-              password,
-              fullName.trim() || normalizedEmail.split('@')[0],
-              'student'
+              password
             );
-            if (signUpErr || !signUpData.user) {
-              const errDetail =
-                signUpErr?.message ||
-                signInErr?.message ||
-                'Não foi possível criar as credenciais de acesso. Verifique os dados digitados.';
-              throw new Error(errDetail);
+
+            if (!signInErr && signInData.user) {
+              authenticatedUserId = signInData.user.id;
+              authenticatedUserEmail = signInData.user.email || normalizedEmail;
+              authenticatedUserName =
+                signInData.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
+              hasActiveSession = Boolean(signInData.session);
+            } else {
+              // 3. Usuário novo: cria o cadastro no Supabase Auth
+              const { data: signUpData, error: signUpErr } = await authService.signUp(
+                normalizedEmail,
+                password,
+                fullName.trim() || normalizedEmail.split('@')[0],
+                'student'
+              );
+
+              if (signUpErr) {
+                const errLower = (signUpErr.message || '').toLowerCase();
+                if (errLower.includes('already registered') || errLower.includes('user already exists')) {
+                  throw new Error(
+                    'Este e-mail já possui cadastro no Tatame Club. Digite a senha correta da sua conta para validar o convite.'
+                  );
+                }
+                throw new Error(signUpErr.message || 'Falha ao registrar suas credenciais.');
+              }
+
+              if (!signUpData?.user) {
+                throw new Error('Não foi possível registrar o usuário. Tente novamente.');
+              }
+
+              authenticatedUserId = signUpData.user.id;
+              authenticatedUserEmail = signUpData.user.email || normalizedEmail;
+              authenticatedUserName =
+                signUpData.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
+              hasActiveSession = Boolean(signUpData.session);
+
+              // Se a sessão não veio no signUp, tenta signIn imediato caso auto-confirm esteja ativo
+              if (!hasActiveSession) {
+                const retrySignIn = await authService.signInWithEmail(normalizedEmail, password);
+                if (retrySignIn.data?.session) {
+                  hasActiveSession = true;
+                }
+              }
             }
-            authenticatedUserId = signUpData.user.id;
-            authenticatedUserEmail = signUpData.user.email || normalizedEmail;
-            authenticatedUserName =
-              signUpData.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
-          } else if (signInData.user) {
-            authenticatedUserId = signInData.user.id;
-            authenticatedUserEmail = signInData.user.email || normalizedEmail;
-            authenticatedUserName =
-              signInData.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
           }
         } else {
           const existing = DataStore.getUsers().find(
@@ -236,6 +273,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           authenticatedUserName = existing?.name || fullName.trim() || normalizedEmail.split('@')[0];
         }
 
+        // 4. Executa a vinculação do convite com o código, CPF e o ID de usuário garantido
         const claimRes = await portalAccessService.claimPortalInvitation({
           inviteCode: inviteCode.trim(),
           cpf: cpf.trim(),
@@ -251,47 +289,58 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           return;
         }
 
+        // 5. Sucesso na validação e vinculação
         if (supabaseActive) {
-          let memberships = await authService.loadUserMemberships(authenticatedUserId);
-          if (memberships.length === 0 && claimRes.tenantId) {
-            await new Promise((resolve) => setTimeout(resolve, 300));
-            memberships = await authService.loadUserMemberships(authenticatedUserId);
-          }
-          if (memberships.length === 0 && claimRes.tenantId) {
-            const tenantSettings = await authService.fetchTenantSettings(claimRes.tenantId);
-            const fallbackMembership: UserMembership = {
-              id: `mem-${Date.now()}`,
-              tenant_id: claimRes.tenantId,
-              role: claimRes.role,
-              status: 'active',
-              student_id: claimRes.studentId || null,
-              guardian_person_id: claimRes.guardianPersonId || null,
-              tenant: tenantSettings
-                ? {
-                    id: tenantSettings.id,
-                    trade_name: tenantSettings.tradeName,
-                    legal_name: tenantSettings.legalName,
-                    cnpj_or_cpf: tenantSettings.cnpjOrCpf,
-                    plan_id: tenantSettings.planId,
-                    status: tenantSettings.status,
-                    settings: tenantSettings.settings,
-                  }
-                : null,
-            };
-            memberships = [fallbackMembership];
-          }
+          if (hasActiveSession) {
+            let memberships = await authService.loadUserMemberships(authenticatedUserId);
+            if (memberships.length === 0 && claimRes.tenantId) {
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              memberships = await authService.loadUserMemberships(authenticatedUserId);
+            }
+            if (memberships.length === 0 && claimRes.tenantId) {
+              const tenantSettings = await authService.fetchTenantSettings(claimRes.tenantId);
+              const fallbackMembership: UserMembership = {
+                id: `mem-${Date.now()}`,
+                tenant_id: claimRes.tenantId,
+                role: claimRes.role,
+                status: 'active',
+                student_id: claimRes.studentId || null,
+                guardian_person_id: claimRes.guardianPersonId || null,
+                tenant: tenantSettings
+                  ? {
+                      id: tenantSettings.id,
+                      trade_name: tenantSettings.tradeName,
+                      legal_name: tenantSettings.legalName,
+                      cnpj_or_cpf: tenantSettings.cnpjOrCpf,
+                      plan_id: tenantSettings.planId,
+                      status: tenantSettings.status,
+                      settings: tenantSettings.settings,
+                    }
+                  : null,
+              };
+              memberships = [fallbackMembership];
+            }
 
-          if (onAuthSuccess) {
-            onAuthSuccess(
-              {
-                id: authenticatedUserId,
-                email: authenticatedUserEmail,
-                user_metadata: { full_name: authenticatedUserName },
-              },
-              memberships
+            if (onAuthSuccess) {
+              onAuthSuccess(
+                {
+                  id: authenticatedUserId,
+                  email: authenticatedUserEmail,
+                  user_metadata: { full_name: authenticatedUserName },
+                },
+                memberships
+              );
+            }
+            onClose();
+          } else {
+            // Sessão pendente de confirmação de e-mail no Supabase Auth
+            setSuccessMessage(
+              `Convite validado e acesso vinculado à sua conta com sucesso! Caso a confirmação de e-mail seja solicitada pelo sistema, verifique sua caixa de entrada (${normalizedEmail}) e realize o login com sua senha.`
             );
+            setAuthMode('login');
+            setLoading(false);
+            return;
           }
-          onClose();
         } else if (claimRes.user) {
           onSelectUser(claimRes.user);
           onClose();

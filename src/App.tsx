@@ -166,6 +166,18 @@ export default function App() {
     setAuditLogs(DataStore.getAuditLogs(currentTenantId));
   }, [currentTenantId]);
 
+  // Abertura automática da modal de login/convite ao receber link direto (?invite=CODIGO)
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('invite')) {
+        setIsLoginOpen(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Carregar alunos em tempo real do banco de dados quando conectado e autenticado
   useEffect(() => {
     let isMounted = true;

@@ -303,8 +303,9 @@ export const portalAccessService = {
    * Pré-valida o código de convite antes do cadastro, retornando dados da academia e do aluno/responsável.
    */
   async verifyPortalInvitation(inviteCode: string): Promise<PortalInvitationVerification> {
-    const cleanCode = (inviteCode || '').replace(/\s+/g, '').toUpperCase();
-    if (!cleanCode) {
+    const rawClean = (inviteCode || '').trim().toUpperCase();
+    const cleanWithoutHyphen = rawClean.replace(/[\s\-]/g, '');
+    if (!cleanWithoutHyphen) {
       return {
         valid: false,
         reason: 'empty_code',
@@ -314,30 +315,66 @@ export const portalAccessService = {
 
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase.rpc('verify_portal_invitation', {
-          p_invite_code: cleanCode,
+        // Tenta buscar no Supabase pelo código original e pelo normalizado
+        let rpcRes = await supabase.rpc('verify_portal_invitation', {
+          p_invite_code: rawClean,
         });
 
-        if (!error && data) {
-          if (data.valid || data.reason !== 'not_found') {
-            return data as PortalInvitationVerification;
-          }
-          const localExists = DataStore.getTenantInvitations().some(
-            (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
-          );
-          if (!localExists) {
-            return data as PortalInvitationVerification;
+        if ((rpcRes.error || !rpcRes.data?.valid) && rawClean !== cleanWithoutHyphen) {
+          const retryRes = await supabase.rpc('verify_portal_invitation', {
+            p_invite_code: cleanWithoutHyphen,
+          });
+          if (!retryRes.error && retryRes.data?.valid) {
+            rpcRes = retryRes;
           }
         }
+
+        if (!rpcRes.error && rpcRes.data) {
+          const d = rpcRes.data as any;
+          if (d.valid || d.reason !== 'not_found') {
+            return {
+              valid: Boolean(d.valid),
+              reason: d.reason,
+              message: d.message || 'Código verificado com sucesso.',
+              invitationId: d.invitation_id || d.invitationId,
+              inviteCode: d.invite_code || d.inviteCode || rawClean,
+              tenantId: d.tenant_id || d.tenantId,
+              academyName: d.academy_name || d.academyName || 'Tatame Club',
+              role: d.role,
+              fullName: d.full_name || d.fullName,
+              email: d.email,
+              maskedEmail: d.masked_email || d.maskedEmail,
+              maskedCpf: d.masked_cpf || d.maskedCpf,
+              requiresCpf: d.requires_cpf !== undefined ? Boolean(d.requires_cpf) : Boolean(d.requiresCpf),
+              expiresAt: d.expires_at || d.expiresAt,
+              acceptedAt: d.accepted_at || d.acceptedAt,
+            };
+          }
+
+          // Se a RPC respondeu formalmente que o convite não existe no Supabase,
+          // verifica se existe localmente no mock DataStore antes de retornar not_found
+          const localExists = DataStore.getTenantInvitations().some(
+            (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanWithoutHyphen
+          );
+          if (!localExists) {
+            return {
+              valid: false,
+              reason: 'not_found',
+              message: d.message || 'Código de convite não encontrado no sistema. Verifique a digitação ou solicite um novo envio à academia.',
+            };
+          }
+        } else if (rpcRes.error && rpcRes.error.code !== '42883' && rpcRes.error.code !== 'PGRST202') {
+          console.warn('Erro ao verificar convite no Supabase:', rpcRes.error);
+        }
       } catch (err) {
-        // Fallback para DataStore caso a RPC ainda não esteja disponível no servidor
+        console.warn('Falha na chamada de verificação de convite:', err);
       }
     }
 
-    // Validação no DataStore
+    // Validação no DataStore local (fallback para ambiente offline ou teste)
     const allInvites = DataStore.getTenantInvitations();
     const inv = allInvites.find(
-      (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+      (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanWithoutHyphen
     );
 
     if (!inv) {
@@ -1184,7 +1221,8 @@ export const portalAccessService = {
       name: params.userName,
     };
 
-    const cleanCode = (params.inviteCode || '').replace(/\s+/g, '').toUpperCase();
+    const rawCode = (params.inviteCode || '').trim().toUpperCase();
+    const cleanCode = rawCode.replace(/[\s\-]/g, '');
     const cleanedInputCpf = cleanCPF(params.cpf || '');
     const normalizedAuthEmail = authUser.email.trim().toLowerCase();
 
@@ -1193,18 +1231,51 @@ export const portalAccessService = {
     }
 
     // 1. Se o Supabase estiver configurado, validar no servidor via RPC
-    if (isSupabaseConfigured() && supabase && isValidUUID(authUser.id)) {
-      const { data, error } = await supabase.rpc('claim_portal_invitation', {
-        p_invite_code: cleanCode,
+    if (isSupabaseConfigured() && supabase) {
+      const targetUserId = isValidUUID(authUser.id) ? authUser.id : null;
+
+      // Tenta chamar com 3 parâmetros (incluindo p_user_id para casos de signUp recente)
+      let rpcRes = await supabase.rpc('claim_portal_invitation', {
+        p_invite_code: rawCode,
         p_cpf: cleanedInputCpf || null,
+        p_user_id: targetUserId,
       });
 
-      if (error && error.code !== '42883' && error.code !== 'PGRST202') {
-        // Se falhou no Supabase, verificar se existe localmente no DataStore antes de falhar
+      // Se der erro 42883 (função com 3 parâmetros não encontrada), tenta a assinatura legada de 2 parâmetros
+      if (rpcRes.error && rpcRes.error.code === '42883') {
+        rpcRes = await supabase.rpc('claim_portal_invitation', {
+          p_invite_code: rawCode,
+          p_cpf: cleanedInputCpf || null,
+        });
+      }
+
+      // Se falhou por código não encontrado e o código original tinha hífens, tenta a versão sem hífens
+      if (
+        (rpcRes.error || !rpcRes.data?.success) &&
+        rawCode !== cleanCode &&
+        rpcRes.error?.code !== '42501'
+      ) {
+        const retryRes = await supabase.rpc('claim_portal_invitation', {
+          p_invite_code: cleanCode,
+          p_cpf: cleanedInputCpf || null,
+          p_user_id: targetUserId,
+        });
+        if (!retryRes.error || (retryRes.data as any)?.success) {
+          rpcRes = retryRes;
+        }
+      }
+
+      const { data, error } = rpcRes;
+
+      if (error) {
+        // Se a função realmente não existir no banco (42883/PGRST202) e o convite existir localmente no DataStore
         const localExists = DataStore.getTenantInvitations().some(
-          (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+          (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanCode
         );
-        if (!localExists) {
+        if (localExists && (error.code === '42883' || error.code === 'PGRST202')) {
+          // Continua para o fallback do DataStore local
+        } else {
+          // Lança o erro real do banco de dados (ex: CPF incorreto, sessão ausente, convite já usado)
           throw new Error(error.message || 'Não foi possível validar o convite de acesso.');
         }
       } else if (data?.success) {
@@ -1250,7 +1321,7 @@ export const portalAccessService = {
 
         const allInvites = DataStore.getTenantInvitations();
         const invIdx = allInvites.findIndex(
-          (i) => (i.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+          (i) => (i.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanCode
         );
         if (invIdx >= 0) {
           allInvites[invIdx] = {
@@ -1277,7 +1348,7 @@ export const portalAccessService = {
     const allInvites = DataStore.getTenantInvitations();
     const inviteIdx = allInvites.findIndex(
       (inv) =>
-        (inv.inviteCode || '').replace(/\s+/g, '').toUpperCase() === cleanCode
+        (inv.inviteCode || '').replace(/[\s\-]/g, '').toUpperCase() === cleanCode
     );
 
     if (inviteIdx === -1) {

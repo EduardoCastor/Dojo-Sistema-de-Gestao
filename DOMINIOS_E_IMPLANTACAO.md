@@ -132,3 +132,17 @@ Para corrigir o erro `invalid input value for enum tenant_status: "expired" (SQL
    - Atualização da RPC `public.register_academy_atomic(...)` para criação atômica e íntegra da academia com `status = 'trial'::public.tenant_status` e assinatura de 10 dias de degustação gratuita sem cobrança.
    - Atualização de `public.admin_reactivate_tenant(...)` para garantir que o tenant receba sempre um valor válido do enum.
    - Concessão de permissões de execução para `authenticated` e `anon` e emissão do sinal `NOTIFY pgrst, 'reload schema';`.
+
+---
+
+## 10. Aplicação das Migrations 37 e 38 (Validação de Convites, Portal do Aluno e Sessão Auth)
+
+Para garantir o funcionamento pleno da validação de links diretos de convites (como `https://www.tatameclub.com.br/?invite=AL-WQA5MR64`), associação segura com CPF e criação de conta de alunos e responsáveis sem erros de autenticação ou código não encontrado:
+
+1. No **SQL Editor** do Supabase (`https://supabase.com/dashboard/project/knmzzndugadmklzzgtaa/sql/new`):
+2. Execute integralmente o script `supabase/migrations/38_fix_portal_invitation_claim_and_auth_session.sql`.
+3. O script aplica:
+   - Normalização de espaços e hífens (`[\s\-]+`) nas RPCs `public.verify_portal_invitation` e `public.claim_portal_invitation`, garantindo que códigos como `AL-WQA5MR64` e `ALWQA5MR64` sejam reconhecidos igualmente.
+   - Suporte ao parâmetro opcional `p_user_id` na RPC `public.claim_portal_invitation(p_invite_code, p_cpf, p_user_id)`, permitindo vincular o convite imediatamente à conta recém-criada mesmo antes da propagação do JWT no cliente.
+   - Sobrecarga com 2 parâmetros para manter compatibilidade reversa total com versões anteriores.
+   - Concessão de permissões de execução para `anon, authenticated, service_role` com `SECURITY DEFINER` e `search_path = public, auth`.
