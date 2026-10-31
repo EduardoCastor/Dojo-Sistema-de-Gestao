@@ -36,8 +36,10 @@ export const StudentDigitalLibrary: React.FC<StudentDigitalLibraryProps> = ({
   enrollments = [],
   libraryItems: propItems,
 }) => {
-  const [accessibleVideos, setAccessibleVideos] = useState<DigitalLibraryItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [accessibleVideos, setAccessibleVideos] = useState<DigitalLibraryItem[]>(
+    propItems && propItems.length > 0 ? propItems : []
+  );
+  const [isLoading, setIsLoading] = useState(!propItems || propItems.length === 0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedArtFilter, setSelectedArtFilter] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');

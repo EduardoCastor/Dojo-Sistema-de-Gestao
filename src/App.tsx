@@ -83,6 +83,7 @@ import { tatamiService } from './services/tatamiService';
 import { financialService, getCurrentCompetence } from './services/financialService';
 import { assessmentService } from './services/assessmentService';
 import { saasPlatformService } from './services/saasPlatformService';
+import { digitalLibraryService } from './services/digitalLibraryService';
 import { detectEnvironmentMode, isAuthorizedPlatformOwnerEmail, OFFICIAL_DOMAINS } from './utils/domainConfig';
 
 export default function App() {
@@ -255,6 +256,17 @@ export default function App() {
           }
         } catch (fErr) {
           console.warn('Aviso ao sincronizar dados financeiros do Supabase:', fErr);
+        }
+
+        // Sincronizar acervo didático da biblioteca digital da academia ativa
+        try {
+          const loadedVideos = await digitalLibraryService.fetchVideos(currentTenantId);
+          if (isMounted && loadedVideos) {
+            setLibraryItems(loadedVideos);
+            DataStore.saveLibraryItems(loadedVideos);
+          }
+        } catch (lErr) {
+          console.warn('Aviso ao sincronizar acervo da biblioteca digital do Supabase:', lErr);
         }
       } catch (err) {
         console.warn('Erro ao sincronizar alunos do banco:', err);
@@ -1642,8 +1654,9 @@ export default function App() {
               martialArts={martialArts}
               tenantId={currentTenantId}
               onAddLibraryItem={handleAddLibraryItem}
-              onRefresh={() => {
-                setLibraryItems(DataStore.getLibraryItems(currentTenantId));
+              onRefresh={async () => {
+                const refreshed = await digitalLibraryService.fetchVideos(currentTenantId);
+                setLibraryItems(refreshed);
               }}
             />
           )}

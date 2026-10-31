@@ -134,15 +134,31 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     : [];
 
   // Filter Digital Library strictly to the student's modality & belt
-  const authorizedLibraryItems = portalAccessService.getAuthorizedDigitalLibraryForActor(
-    {
-      userId: student.userId || person.id,
-      tenantId: student.tenantId,
-      role: 'student',
-      studentId: student.id,
-    },
-    libraryItems
-  );
+  const authorizedLibraryItems = React.useMemo(() => {
+    try {
+      return portalAccessService.getAuthorizedDigitalLibraryForActor(
+        {
+          actor: {
+            id: student.userId || person.id,
+            tenantId: student.tenantId,
+            name: person.fullName,
+            email: person.email,
+            role: 'student',
+            active: true,
+            studentId: student.id,
+          },
+          tenantId: student.tenantId,
+          students: [student],
+          persons: [person],
+          libraryItems: libraryItems || [],
+        }
+      );
+    } catch {
+      return (libraryItems || []).filter(
+        (v) => v.tenantId === student.tenantId && (v.status === 'published' || !v.status)
+      );
+    }
+  }, [student, person, libraryItems]);
 
   const handleCardClick = (item: DigitalLibraryItem) => {
     setActivePlayerVideo(item);

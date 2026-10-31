@@ -315,6 +315,44 @@ async function runAllTests() {
     'Vídeo excluído não consta mais na listagem'
   );
 
+  // ---------------------------------------------------------------------------
+  // CENÁRIO H: Correção Problema 1 & 2 — Carga Inicial e Acesso no Portal do Aluno
+  // ---------------------------------------------------------------------------
+  console.log('\n--- CENÁRIO H: Carga Inicial e Acesso do Aluno Sem Matrícula em Turma ---');
+
+  // H1: Carregamento inicial retorna vídeos existentes sem precisar adicionar novo vídeo
+  const initialColdLoad = await digitalLibraryService.fetchVideos(tenantTest);
+  assert(
+    initialColdLoad.length >= 1,
+    'Carga inicial no tenant recupera vídeos já cadastrados no banco sem exigir inclusão prévia'
+  );
+
+  // H2: Aluno novo sem turmas lançadas ainda (activeMartialArtIds.size === 0)
+  const newStudentWithoutClass = {
+    id: 'student-new-no-classes',
+    tenantId: tenantTest,
+    graduations: [],
+    enrollments: [],
+  };
+
+  const accessibleNewStudent = await digitalLibraryService.fetchStudentAccessibleVideos(
+    tenantTest,
+    newStudentWithoutClass.id,
+    {
+      studentGraduations: [],
+      studentEnrollments: [],
+    }
+  );
+
+  assert(
+    accessibleNewStudent.length > 0,
+    'Aluno sem matrículas em turmas ainda tem acesso a vídeos liberados para todas as faixas (allBelts)'
+  );
+  assert(
+    accessibleNewStudent.every((v) => v.allBelts || v.accessScope === 'tenant_all'),
+    'Todos os vídeos retornados para aluno sem faixa específica são liberados para todas as faixas'
+  );
+
   console.log('\n🥋 ========================================================');
   console.log(`🥋 TODOS OS ${passedTests}/${totalTests} TESTES FORAM APROVADOS COM SUCESSO!`);
   console.log('🥋 ========================================================\n');

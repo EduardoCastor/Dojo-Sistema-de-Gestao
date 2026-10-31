@@ -36,7 +36,9 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
   onAddLibraryItem,
   onRefresh,
 }) => {
-  const [items, setItems] = useState<DigitalLibraryItem[]>(initialItems);
+  const [items, setItems] = useState<DigitalLibraryItem[]>(initialItems || []);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedArtFilter, setSelectedArtFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -48,9 +50,31 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
   const [activePlayerVideo, setActivePlayerVideo] = useState<DigitalLibraryItem | null>(null);
   const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
 
-  // Sync when initialItems change
+  // Carregar vídeos reais da academia no primeiro carregamento e na troca de academia
+  const loadVideos = React.useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const fetched = await digitalLibraryService.fetchVideos(tenantId);
+      setItems(fetched);
+    } catch (err: any) {
+      console.error('Erro ao carregar acervo da biblioteca digital:', err);
+      setLoadError(err?.message || 'Falha ao carregar os vídeos da biblioteca digital.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [tenantId]);
+
   React.useEffect(() => {
-    setItems(initialItems);
+    loadVideos();
+  }, [loadVideos]);
+
+  // Sync quando initialItems recebidos do componente pai mudam
+  React.useEffect(() => {
+    if (initialItems && initialItems.length > 0) {
+      setItems(initialItems);
+      setIsLoading(false);
+    }
   }, [initialItems]);
 
   // Fallback martial arts if none passed
@@ -98,8 +122,7 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
   const handleSaveVideo = async (payload: SaveVideoPayload) => {
     const res = await digitalLibraryService.saveVideo(payload);
     if (res.success) {
-      const refreshed = await digitalLibraryService.fetchVideos(tenantId);
-      setItems(refreshed);
+      await loadVideos();
       if (onRefresh) onRefresh();
     }
   };
@@ -111,8 +134,7 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
     setDeletingVideoId(videoId);
     try {
       await digitalLibraryService.deleteVideo(tenantId, videoId);
-      const refreshed = await digitalLibraryService.fetchVideos(tenantId);
-      setItems(refreshed);
+      await loadVideos();
       if (onRefresh) onRefresh();
     } finally {
       setDeletingVideoId(null);
@@ -128,9 +150,15 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
         : 'published';
 
     await digitalLibraryService.updateVideoStatus(tenantId, video.id, nextStatus);
-    const refreshed = await digitalLibraryService.fetchVideos(tenantId);
-    setItems(refreshed);
+    await loadVideos();
     if (onRefresh) onRefresh();
+  };
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setSelectedArtFilter('all');
+    setCategoryFilter('all');
+    setStatusFilter('all');
   };
 
   return (
@@ -242,8 +270,33 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
         </div>
       </div>
 
-      {/* Grid of Video Cards */}
-      {filteredItems.length > 0 ? (
+      {/* Grid of Video Cards or Visual States */}
+      {isLoading ? (
+        /* Loading State */
+        <div className="p-16 text-center rounded-2xl border border-slate-800 bg-slate-900/40 space-y-4">
+          <div className="inline-block h-9 w-9 animate-spin rounded-full border-4 border-solid border-red-500 border-r-transparent align-[-0.125em]" />
+          <h3 className="text-sm font-bold text-white">Carregando Biblioteca Digital...</h3>
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            Consultando acervo didático e videoaulas da academia no Supabase.
+          </p>
+        </div>
+      ) : loadError ? (
+        /* Error State with Retry */
+        <div className="p-12 text-center rounded-2xl border border-red-900/40 bg-red-950/20 space-y-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-900/30 text-red-400 mx-auto">
+            <Video className="h-6 w-6" />
+          </div>
+          <h3 className="text-sm font-bold text-white">Não foi possível carregar os vídeos</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">{loadError}</p>
+          <button
+            onClick={loadVideos}
+            className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-500 transition-colors shadow cursor-pointer mt-2"
+          >
+            Tentar Novamente
+          </button>
+        </div>
+      ) : filteredItems.length > 0 ? (
+        /* Content Grid */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredItems.map((item) => {
             const statusLabel =
@@ -388,17 +441,15 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
             );
           })}
         </div>
-      ) : (
-        /* Empty State */
+      ) : items.length === 0 ? (
+        /* Empty State: Nenhum vídeo cadastrado na academia */
         <div className="p-12 text-center rounded-2xl border border-slate-800 bg-slate-900/40 space-y-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800 text-slate-400 mx-auto">
             <Video className="h-6 w-6" />
           </div>
-          <h3 className="text-sm font-bold text-white">Nenhum vídeo didático encontrado</h3>
+          <h3 className="text-sm font-bold text-white">Biblioteca Digital Vazia</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto">
-            {searchTerm || selectedArtFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all'
-              ? 'Nenhum resultado corresponde aos filtros selecionados. Tente ajustar os termos de busca.'
-              : 'Cadastre a primeira videoaula do YouTube para iniciar o acervo técnico dos seus alunos.'}
+            Cadastre a primeira videoaula do YouTube para iniciar o acervo técnico dos seus alunos.
           </p>
           <button
             onClick={handleOpenCreate}
@@ -406,6 +457,23 @@ export const DigitalLibraryView: React.FC<DigitalLibraryViewProps> = ({
           >
             <Plus className="h-4 w-4" />
             <span>Cadastrar Primeiro Vídeo</span>
+          </button>
+        </div>
+      ) : (
+        /* Filter Empty State: Vídeos existem mas nenhum atende aos filtros */
+        <div className="p-12 text-center rounded-2xl border border-slate-800 bg-slate-900/40 space-y-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800 text-slate-400 mx-auto">
+            <Filter className="h-6 w-6" />
+          </div>
+          <h3 className="text-sm font-bold text-white">Nenhum vídeo corresponde aos filtros</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Foram encontrados {items.length} vídeos no acervo, mas nenhum deles atende aos critérios de busca ou filtros selecionados.
+          </p>
+          <button
+            onClick={handleClearFilters}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer mt-2"
+          >
+            <span>Limpar Filtros</span>
           </button>
         </div>
       )}

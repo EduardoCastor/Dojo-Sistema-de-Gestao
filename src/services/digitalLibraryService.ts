@@ -131,7 +131,7 @@ export const digitalLibraryService = {
           p_student_id: studentId,
         });
 
-        if (!error && Array.isArray(data)) {
+        if (!error && Array.isArray(data) && data.length > 0) {
           return data.map((row: any) => ({
             id: row.video_id,
             tenantId: row.tenant_id,
@@ -157,12 +157,15 @@ export const digitalLibraryService = {
           }));
         }
       } catch (err) {
-        console.warn('Erro ao consultar vídeos acessíveis do aluno via RPC Supabase:', err);
+        console.warn('Aviso ao consultar vídeos via RPC get_student_accessible_videos:', err);
       }
     }
 
-    // Fallback: regras de negócio client-side
-    const allTenantVideos = DataStore.getLibraryItems(tenantId);
+    // Fallback: carregar todos os vídeos do tenant (do Supabase ou DataStore) e aplicar filtragem
+    let allTenantVideos = await this.fetchVideos(tenantId);
+    if (!allTenantVideos || allTenantVideos.length === 0) {
+      allTenantVideos = DataStore.getLibraryItems(tenantId);
+    }
     const publishedVideos = allTenantVideos.filter(v => v.status === 'published' || !v.status);
 
     // Identificar artes marciais ativas do aluno
@@ -175,7 +178,7 @@ export const digitalLibraryService = {
       });
     }
 
-    // Também considerar graduações registradas como indicador de prática
+    // Considerar graduações registradas como indicador de prática
     if (context?.studentGraduations && context.studentGraduations.length > 0) {
       context.studentGraduations.forEach(g => {
         if (g.martialArtId) {
@@ -184,14 +187,12 @@ export const digitalLibraryService = {
       });
     }
 
-    // Se o aluno ainda não tiver matrículas específicas mapeadas nos props,
-    // buscar do storage
+    // Se o aluno ainda não tiver matrículas específicas mapeadas nos props, buscar do storage
     if (activeMartialArtIds.size === 0) {
       const enrollments = DataStore.getEnrollments(tenantId).filter(
         e => e.studentId === studentId && e.status === 'active'
       );
       enrollments.forEach(e => {
-        // Encontrar modalidade da turma
         const cls = DataStore.getClasses(tenantId).find(c => c.id === e.classGroupId);
         if (cls?.martialArtId) {
           activeMartialArtIds.add(cls.martialArtId);
@@ -206,9 +207,9 @@ export const digitalLibraryService = {
       }
     }
 
-    // Mapear faixas atuais do aluno
+    // Mapear faixas atuais do aluno por modalidade
     const studentBeltsByArt = new Map<string, { beltId?: string; beltName?: string }>();
-    if (context?.studentGraduations) {
+    if (context?.studentGraduations && context.studentGraduations.length > 0) {
       context.studentGraduations.forEach(g => {
         if (g.martialArtId) {
           studentBeltsByArt.set(g.martialArtId, { beltId: g.beltId, beltName: g.beltName });
@@ -225,21 +226,24 @@ export const digitalLibraryService = {
       }
     }
 
-    // Filtragem restrita
+    // Filtragem de acesso seguro e proporcional ao aluno da academia
     return publishedVideos.filter(video => {
-      // 1. Deve ser da mesma arte marcial em que o aluno tem atividade
-      if (video.martialArtId && !activeMartialArtIds.has(video.martialArtId)) {
+      // 1. Se o vídeo pertence a uma modalidade específica e o aluno possui modalidades ativas definidas,
+      // verificar compatibilidade de modalidade
+      if (video.martialArtId && activeMartialArtIds.size > 0 && !activeMartialArtIds.has(video.martialArtId)) {
         return false;
       }
 
-      // 2. Se for liberado para todas as faixas da modalidade
-      if (video.allBelts) {
+      // 2. Se for liberado para todas as faixas (allBelts = true) ou acesso geral
+      if (video.allBelts || video.accessScope === 'tenant_all' || video.accessScope === 'public' || (!video.targetBeltIds?.length && !video.targetBeltNames?.length)) {
         return true;
       }
 
-      // 3. Se for restrito a faixas, verificar se a faixa atual do aluno é contemplada
+      // 3. Se for restrito a faixas específicas, verificar correspondência com a faixa do aluno
       const studentBelt = video.martialArtId ? studentBeltsByArt.get(video.martialArtId) : undefined;
       if (!studentBelt) {
+        // Se a restrição é de faixas e o aluno não tem faixa cadastrada para a modalidade,
+        // liberar apenas se o vídeo for para todas as faixas (já tratado acima)
         return false;
       }
 
