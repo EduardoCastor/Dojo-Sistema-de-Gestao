@@ -19,6 +19,7 @@ import { authService, isSupabaseConfigured, UserMembership } from '../../service
 import { portalAccessService, PortalInvitationVerification } from '../../services/portalAccessService';
 import { DataStore } from '../../data/storage';
 import { formatCPF } from '../../utils/cpfValidator';
+import { getAuthRedirectUrl } from '../../utils/domainConfig';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -47,6 +48,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [inviteCode, setInviteCode] = useState('');
   const [cpf, setCpf] = useState('');
   const [acceptedLegal, setAcceptedLegal] = useState(false);
+  const [authenticatedUser, setAuthenticatedUser] = useState<any | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,18 +87,54 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    let isMounted = true;
+
+    // 1. Detecta ou aguarda resolução de sessão do Google OAuth / Supabase
+    if (supabaseActive) {
+      authService.getOrWaitForSession().then((session) => {
+        if (isMounted && session?.user) {
+          setAuthenticatedUser(session.user);
+          if (session.user.email) setEmail(session.user.email);
+          if (session.user.user_metadata?.full_name) {
+            setFullName(session.user.user_metadata.full_name);
+          }
+        }
+      });
+    }
+
+    // 2. Extrai código da URL ou restaura do localStorage (preservado do redirecionamento Google)
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const inviteFromUrl = urlParams.get('invite');
-      if (inviteFromUrl) {
-        const clean = inviteFromUrl.trim().toUpperCase();
-        setInviteCode(clean);
-        setAuthMode('claim_invite');
-        handleVerifyInviteCode(clean);
+      let targetCode = inviteFromUrl ? inviteFromUrl.trim().toUpperCase() : '';
+      let targetCpf = '';
+
+      if (!targetCode) {
+        const pendingRaw = localStorage.getItem('tatame_pending_invite');
+        if (pendingRaw) {
+          try {
+            const parsed = JSON.parse(pendingRaw);
+            if (parsed?.code) targetCode = String(parsed.code).trim().toUpperCase();
+            if (parsed?.cpf) targetCpf = String(parsed.cpf).trim();
+          } catch {
+            // ignore
+          }
+        }
       }
-    } catch (e) {
+
+      if (targetCode) {
+        setInviteCode(targetCode);
+        if (targetCpf && !cpf) setCpf(formatCPF(targetCpf));
+        setAuthMode('claim_invite');
+        handleVerifyInviteCode(targetCode);
+      }
+    } catch {
       // ignore
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -106,7 +144,29 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setSuccessMessage(null);
     setLoading(true);
     try {
-      const { error: oauthErr } = await authService.signInWithGoogle();
+      const cleanCode = inviteCode.trim().toUpperCase();
+
+      // Salva no localStorage para restaurar imediatamente após o redirecionamento
+      if (cleanCode) {
+        try {
+          localStorage.setItem(
+            'tatame_pending_invite',
+            JSON.stringify({
+              code: cleanCode,
+              cpf: cpf.trim(),
+              timestamp: Date.now(),
+            })
+          );
+        } catch {
+          // ignore
+        }
+      }
+
+      const customRedirect = cleanCode
+        ? getAuthRedirectUrl('main_site', { invite: cleanCode })
+        : undefined;
+
+      const { error: oauthErr } = await authService.signInWithGoogle('main_site', customRedirect);
       if (oauthErr) {
         throw oauthErr;
       }
@@ -194,7 +254,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           setLoading(false);
           return;
         }
-        if (!normalizedEmail || !password) {
+
+        // 1. Verifica se já existe sessão autenticada ativa (ex: Google OAuth ou login recente)
+        const currentActiveSession = authenticatedUser?.id
+          ? { user: authenticatedUser }
+          : await authService.getOrWaitForSession(600);
+        const sessionUser = currentActiveSession?.user || null;
+
+        if (!sessionUser && (!normalizedEmail || !password)) {
           setError('Informe seu e-mail e crie uma senha de acesso para vincular ao convite.');
           setLoading(false);
           return;
@@ -206,16 +273,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         let hasActiveSession = false;
 
         if (supabaseActive) {
-          // 1. Verifica se já existe uma sessão ativa
-          const activeSession = await authService.getSession();
-          if (activeSession?.user) {
-            authenticatedUserId = activeSession.user.id;
-            authenticatedUserEmail = activeSession.user.email || normalizedEmail;
+          if (sessionUser) {
+            // Usuário autenticado pelo Google ou Supabase Auth: pula cadastro de senha
+            authenticatedUserId = sessionUser.id;
+            authenticatedUserEmail = sessionUser.email || normalizedEmail;
             authenticatedUserName =
-              activeSession.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
+              sessionUser.user_metadata?.full_name || fullName.trim() || normalizedEmail;
             hasActiveSession = true;
           } else {
-            // 2. Tenta autenticar caso o usuário já possua conta criada
+            // Usuário não autenticado: realiza login ou cadastro por e-mail e senha
             const { data: signInData, error: signInErr } = await authService.signInWithEmail(
               normalizedEmail,
               password
@@ -228,7 +294,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 signInData.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
               hasActiveSession = Boolean(signInData.session);
             } else {
-              // 3. Usuário novo: cria o cadastro no Supabase Auth
               const { data: signUpData, error: signUpErr } = await authService.signUp(
                 normalizedEmail,
                 password,
@@ -256,7 +321,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 signUpData.user.user_metadata?.full_name || fullName.trim() || normalizedEmail;
               hasActiveSession = Boolean(signUpData.session);
 
-              // Se a sessão não veio no signUp, tenta signIn imediato caso auto-confirm esteja ativo
               if (!hasActiveSession) {
                 const retrySignIn = await authService.signInWithEmail(normalizedEmail, password);
                 if (retrySignIn.data?.session) {
@@ -273,7 +337,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           authenticatedUserName = existing?.name || fullName.trim() || normalizedEmail.split('@')[0];
         }
 
-        // 4. Executa a vinculação do convite com o código, CPF e o ID de usuário garantido
+        // 2. Executa a vinculação do convite com o código, CPF e o ID de usuário garantido
         const claimRes = await portalAccessService.claimPortalInvitation({
           inviteCode: inviteCode.trim(),
           cpf: cpf.trim(),
@@ -289,7 +353,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           return;
         }
 
-        // 5. Sucesso na validação e vinculação
+        // Limpa o convite pendente do localStorage após o sucesso da vinculação
+        try {
+          localStorage.removeItem('tatame_pending_invite');
+        } catch {
+          // ignore
+        }
+
+        // 3. Sucesso na validação e vinculação
         if (supabaseActive) {
           if (hasActiveSession) {
             let memberships = await authService.loadUserMemberships(authenticatedUserId);
@@ -333,7 +404,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             }
             onClose();
           } else {
-            // Sessão pendente de confirmação de e-mail no Supabase Auth
             setSuccessMessage(
               `Convite validado e acesso vinculado à sua conta com sucesso! Caso a confirmação de e-mail seja solicitada pelo sistema, verifique sua caixa de entrada (${normalizedEmail}) e realize o login com sua senha.`
             );
@@ -503,39 +573,74 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           {/* Botão Google OAuth */}
           {authMode !== 'forgot' && (
             <div>
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2.5 rounded-lg border border-slate-700 bg-slate-800/90 hover:bg-slate-800 py-2.5 px-4 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#EA4335"
-                    d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.4l3.7 2.8C6.2 7.2 8.9 5 12 5z"
-                  />
-                  <path
-                    fill="#4285F4"
-                    d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.6l3.7 2.9c2.2-2 3.7-5 3.7-8.7z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.3 14.8c-.2-.8-.4-1.6-.4-2.5s.2-1.7.4-2.5L1.6 7C.6 9 0 11.2 0 13.5s.6 4.5 1.6 6.5l3.7-2.9z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5L1.6 17c1.9 3.9 5.8 7 10.4 7z"
-                  />
-                </svg>
-                <span>Continuar com Google</span>
-              </button>
-              <div className="relative my-3 flex items-center justify-center">
-                <div className="border-t border-slate-800 w-full" />
-                <span className="bg-slate-900 px-2 text-[10px] text-slate-500 uppercase tracking-wider">
-                  ou via e-mail
-                </span>
-                <div className="border-t border-slate-800 w-full" />
-              </div>
+              {authenticatedUser ? (
+                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2.5 text-emerald-200">
+                    <div className="h-7 w-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white flex items-center gap-1.5">
+                        <span>Conta Google Conectada</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-normal">
+                          Sessão Ativa
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-emerald-300 font-mono mt-0.5">{authenticatedUser.email}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (supabaseActive) {
+                        await authService.signOut();
+                      }
+                      setAuthenticatedUser(null);
+                      setEmail('');
+                      setPassword('');
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer shrink-0 ml-2"
+                  >
+                    Trocar conta
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2.5 rounded-lg border border-slate-700 bg-slate-800/90 hover:bg-slate-800 py-2.5 px-4 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#EA4335"
+                        d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.4l3.7 2.8C6.2 7.2 8.9 5 12 5z"
+                      />
+                      <path
+                        fill="#4285F4"
+                        d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.6l3.7 2.9c2.2-2 3.7-5 3.7-8.7z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.3 14.8c-.2-.8-.4-1.6-.4-2.5s.2-1.7.4-2.5L1.6 7C.6 9 0 11.2 0 13.5s.6 4.5 1.6 6.5l3.7-2.9z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5L1.6 17c1.9 3.9 5.8 7 10.4 7z"
+                      />
+                    </svg>
+                    <span>Continuar com Google</span>
+                  </button>
+                  <div className="relative my-3 flex items-center justify-center">
+                    <div className="border-t border-slate-800 w-full" />
+                    <span className="bg-slate-900 px-2 text-[10px] text-slate-500 uppercase tracking-wider">
+                      ou via e-mail e senha
+                    </span>
+                    <div className="border-t border-slate-800 w-full" />
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -634,51 +739,70 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             )}
 
             <div>
-              <label className="block text-slate-300 font-medium mb-1">E-mail de Acesso *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-slate-300 font-medium">E-mail de Acesso *</label>
+                {authenticatedUser && (
+                  <span className="text-[10px] text-emerald-400 font-medium">Autenticado via Google</span>
+                )}
+              </div>
               <div className="relative">
                 <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
                 <input
                   type="email"
                   required
+                  readOnly={Boolean(authenticatedUser)}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu.email@exemplo.com.br"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                  className={`w-full rounded-lg border px-3 pl-9 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none ${
+                    authenticatedUser
+                      ? 'bg-slate-900/90 text-slate-300 border-emerald-500/30 cursor-not-allowed'
+                      : 'border-slate-700 bg-slate-800'
+                  }`}
                 />
               </div>
             </div>
 
             {authMode !== 'forgot' && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-slate-300 font-medium">Senha *</label>
-                  {authMode === 'login' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMode('forgot');
-                        setError(null);
-                        setSuccessMessage(null);
-                      }}
-                      className="text-[11px] text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
-                    >
-                      Esqueceu a senha?
-                    </button>
-                  )}
+              authMode === 'claim_invite' && authenticatedUser ? (
+                <div className="p-2.5 rounded-lg border border-emerald-500/20 bg-emerald-950/20 text-[11px] text-emerald-300 flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>
+                    Autenticado com a conta Google (<strong>{authenticatedUser.email}</strong>). Nenhuma senha adicional é necessária para validar este convite.
+                  </span>
                 </div>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Mínimo de 6 caracteres"
-                    minLength={6}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
-                  />
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-300 font-medium">Senha *</label>
+                    {authMode === 'login' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMode('forgot');
+                          setError(null);
+                          setSuccessMessage(null);
+                        }}
+                        className="text-[11px] text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
+                      >
+                        Esqueceu a senha?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                    <input
+                      type="password"
+                      required={authMode === 'login' || authMode === 'signup' || (authMode === 'claim_invite' && !authenticatedUser)}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Mínimo de 6 caracteres"
+                      minLength={6}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-3 py-2 text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
-              </div>
+              )
             )}
 
             {(authMode === 'signup' || authMode === 'claim_invite') && (

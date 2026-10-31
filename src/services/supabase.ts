@@ -196,6 +196,46 @@ export const authService = {
     return data.session;
   },
 
+  /**
+   * Aguarda a resolução da sessão do Supabase caso haja processamento de callback OAuth em andamento
+   */
+  async getOrWaitForSession(maxWaitMs = 1500): Promise<Session | null> {
+    if (!supabase) return null;
+
+    const current = await this.getSession();
+    if (current?.user) return current;
+
+    const hasOAuthInUrl =
+      typeof window !== 'undefined' &&
+      (window.location.hash.includes('access_token=') ||
+        window.location.search.includes('code=') ||
+        window.location.search.includes('error='));
+
+    if (!hasOAuthInUrl) {
+      return current;
+    }
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const timeout = setTimeout(async () => {
+        if (!resolved) {
+          resolved = true;
+          const fallback = await authService.getSession();
+          resolve(fallback);
+        }
+      }, maxWaitMs);
+
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        if (!resolved && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
+          resolved = true;
+          clearTimeout(timeout);
+          sub?.subscription?.unsubscribe();
+          resolve(session);
+        }
+      });
+    });
+  },
+
   async getUser(): Promise<SupabaseUser | null> {
     if (!supabase) return null;
     const { data, error } = await supabase.auth.getUser();
@@ -235,15 +275,19 @@ export const authService = {
 
   /**
    * Inicia o fluxo de login OAuth com Google via Supabase Auth.
-   * Nunca expõe segredos OAuth no frontend e redireciona para a URL permitida do ambiente.
+   * Preserva parâmetros de convite no redirecionamento quando fornecidos.
    */
-  async signInWithGoogle(redirectTarget: 'main_site' | 'saas_admin_panel' = 'main_site') {
+  async signInWithGoogle(
+    redirectTarget: 'main_site' | 'saas_admin_panel' = 'main_site',
+    customRedirectTo?: string,
+    queryParams?: Record<string, string>
+  ) {
     if (!supabase) {
       throw new Error(
         'O provedor Google OAuth requer o Supabase configurado (VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY).'
       );
     }
-    const redirectTo = getAuthRedirectUrl(redirectTarget);
+    const redirectTo = customRedirectTo || getAuthRedirectUrl(redirectTarget, queryParams);
     return await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {

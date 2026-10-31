@@ -166,11 +166,13 @@ export default function App() {
     setAuditLogs(DataStore.getAuditLogs(currentTenantId));
   }, [currentTenantId]);
 
-  // Abertura automática da modal de login/convite ao receber link direto (?invite=CODIGO)
+  // Abertura automática da modal de login/convite ao receber link direto (?invite=CODIGO) ou retorno de OAuth com convite pendente
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('invite')) {
+      const urlInvite = urlParams.get('invite');
+      const pendingRaw = localStorage.getItem('tatame_pending_invite');
+      if (urlInvite || pendingRaw) {
         setIsLoginOpen(true);
       }
     } catch {
@@ -401,14 +403,31 @@ export default function App() {
         applyMembershipContext(sessionUser, memberships, {
           preserveNavigation: isAlreadyActiveSameUser,
         });
+        try {
+          localStorage.removeItem('tatame_pending_invite');
+        } catch {
+          // ignore
+        }
+      } else {
+        // Usuário autenticado pelo Google/Supabase mas ainda sem membership vinculado
+        try {
+          const urlParams = new URLSearchParams(window.location.search);
+          const urlInvite = urlParams.get('invite');
+          const pendingRaw = localStorage.getItem('tatame_pending_invite');
+          if (urlInvite || pendingRaw) {
+            setIsLoginOpen(true);
+          }
+        } catch {
+          // ignore
+        }
       }
     };
 
     // Limpar rascunhos temporários expirados (>12h) ao iniciar
     formDraftStore.purgeExpiredDrafts();
 
-    // Verificar sessão existente ao carregar o aplicativo
-    authService.getSession().then(async (session) => {
+    // Aguardar e verificar sessão existente ao carregar o aplicativo (com suporte a hash OAuth)
+    authService.getOrWaitForSession().then(async (session) => {
       if (session?.user) {
         await handleSessionUser(session.user);
       }

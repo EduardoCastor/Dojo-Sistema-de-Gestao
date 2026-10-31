@@ -152,32 +152,48 @@ export function isAuthorizedPlatformOwnerEmail(email?: string | null): boolean {
  * Constrói a URL segura de redirecionamento de autenticação (confirmação de e-mail / redefinição de senha),
  * preservando o domínio oficial `https://painel.tatameclub.com.br` em produção sem depender de URLs de desenvolvimento.
  */
-export function getAuthRedirectUrl(target: 'main_site' | 'saas_admin_panel' | 'reset_password'): string {
+export function getAuthRedirectUrl(
+  target: 'main_site' | 'saas_admin_panel' | 'reset_password',
+  queryParams?: Record<string, string>
+): string {
+  let base = '';
   if (typeof window === 'undefined') {
-    return target === 'saas_admin_panel'
-      ? OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL_URL
-      : OFFICIAL_DOMAINS.MAIN_SITE_URL;
-  }
+    base =
+      target === 'saas_admin_panel'
+        ? OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL_URL
+        : OFFICIAL_DOMAINS.MAIN_SITE_URL;
+  } else {
+    const host = window.location.hostname.toLowerCase();
+    const origin = window.location.origin;
 
-  const host = window.location.hostname.toLowerCase();
-  const origin = window.location.origin;
-
-  // Em produção nos domínios oficiais
-  if (host === OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL || host.startsWith('painel.')) {
-    return OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL_URL;
-  }
-  if (host === OFFICIAL_DOMAINS.MAIN_SITE || host === `www.${OFFICIAL_DOMAINS.MAIN_SITE}`) {
-    if (target === 'saas_admin_panel') {
-      return OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL_URL;
+    // Em produção nos domínios oficiais
+    if (host === OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL || host.startsWith('painel.')) {
+      base = OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL_URL;
+    } else if (host === OFFICIAL_DOMAINS.MAIN_SITE || host === `www.${OFFICIAL_DOMAINS.MAIN_SITE}`) {
+      if (target === 'saas_admin_panel') {
+        base = OFFICIAL_DOMAINS.SAAS_ADMIN_PANEL_URL;
+      } else {
+        base = target === 'reset_password'
+          ? `${OFFICIAL_DOMAINS.MAIN_SITE_URL}/reset-password`
+          : OFFICIAL_DOMAINS.MAIN_SITE_URL;
+      }
+    } else {
+      // Em ambiente de homologação / preview / local
+      if (target === 'saas_admin_panel') {
+        base = `${origin}/?env=painel`;
+      } else {
+        base = target === 'reset_password' ? `${origin}/reset-password` : origin;
+      }
     }
-    return target === 'reset_password'
-      ? `${OFFICIAL_DOMAINS.MAIN_SITE_URL}/reset-password`
-      : OFFICIAL_DOMAINS.MAIN_SITE_URL;
   }
 
-  // Em ambiente de homologação / preview / local
-  if (target === 'saas_admin_panel') {
-    return `${origin}/?env=painel`;
+  if (queryParams && Object.keys(queryParams).length > 0) {
+    const url = new URL(base);
+    Object.entries(queryParams).forEach(([k, v]) => {
+      if (v) url.searchParams.set(k, v);
+    });
+    return url.toString();
   }
-  return target === 'reset_password' ? `${origin}/reset-password` : origin;
+
+  return base;
 }
