@@ -91,6 +91,35 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     }
   }, [person]);
 
+  // Filter Digital Library strictly to the student's modality & belt
+  // Declared at top level with all Hooks to ensure identical execution count & order across renders
+  const authorizedLibraryItems = React.useMemo(() => {
+    if (!student || !person) return [];
+    try {
+      return portalAccessService.getAuthorizedDigitalLibraryForActor(
+        {
+          actor: {
+            id: student.userId || person.id,
+            tenantId: student.tenantId,
+            name: person.fullName,
+            email: person.email,
+            role: 'student',
+            active: true,
+            studentId: student.id,
+          },
+          tenantId: student.tenantId,
+          students: [student],
+          persons: [person],
+          libraryItems: libraryItems || [],
+        }
+      );
+    } catch {
+      return (libraryItems || []).filter(
+        (v) => v.tenantId === student.tenantId && (v.status === 'published' || !v.status)
+      );
+    }
+  }, [student, person, libraryItems]);
+
   if (!student || !person) {
     return (
       <div className="p-8 text-center text-slate-400 bg-slate-900/50 rounded-2xl border border-slate-800 my-8 max-w-2xl mx-auto space-y-2">
@@ -132,33 +161,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         .filter((a) => a.studentId === student.id && a.tenantId === student.tenantId)
         .sort((a, b) => b.date.localeCompare(a.date))
     : [];
-
-  // Filter Digital Library strictly to the student's modality & belt
-  const authorizedLibraryItems = React.useMemo(() => {
-    try {
-      return portalAccessService.getAuthorizedDigitalLibraryForActor(
-        {
-          actor: {
-            id: student.userId || person.id,
-            tenantId: student.tenantId,
-            name: person.fullName,
-            email: person.email,
-            role: 'student',
-            active: true,
-            studentId: student.id,
-          },
-          tenantId: student.tenantId,
-          students: [student],
-          persons: [person],
-          libraryItems: libraryItems || [],
-        }
-      );
-    } catch {
-      return (libraryItems || []).filter(
-        (v) => v.tenantId === student.tenantId && (v.status === 'published' || !v.status)
-      );
-    }
-  }, [student, person, libraryItems]);
 
   const handleCardClick = (item: DigitalLibraryItem) => {
     setActivePlayerVideo(item);
