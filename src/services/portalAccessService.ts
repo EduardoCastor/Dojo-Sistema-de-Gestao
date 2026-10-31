@@ -501,30 +501,65 @@ export const portalAccessService = {
 
     if (isSupabaseConfigured()) {
       if (!supabase) throw new Error('O Supabase está configurado, mas o cliente de banco não está disponível.');
-      if (!isValidUUID(params.tenantId) || !isValidUUID(params.targetId)) {
-        throw new Error('Não foi possível localizar os identificadores reais da academia e do cadastro para gravar o convite.');
+      if (isValidUUID(params.tenantId) && isValidUUID(params.targetId)) {
+        const { data, error } = await supabase.rpc('manage_portal_account_access', {
+          p_tenant_id: params.tenantId,
+          p_target_type: params.targetType,
+          p_target_id: params.targetId,
+          p_action: normalizedAction,
+          p_email: params.email?.trim().toLowerCase() || null,
+          p_allow_anthropometry: params.allowAnthropometry !== undefined ? params.allowAnthropometry : null,
+        });
+
+        if (error) {
+          console.error('Erro retornado pela RPC manage_portal_account_access:', error);
+
+          // Verifica se a função RPC em si realmente não existe no catálogo/cache do Supabase
+          const isRpcMissing =
+            (error.code === 'PGRST202' && (error.message?.includes('manage_portal_account_access') || !error.message)) ||
+            (error.code === '42883' && error.message?.includes('manage_portal_account_access'));
+
+          if (isRpcMissing) {
+            throw new Error(
+              'O serviço de convites do portal (RPC manage_portal_account_access) não está disponível no banco da academia. Verifique as permissões de execução para a role authenticated no Supabase.'
+            );
+          }
+
+          // Erro de autorização / autenticação
+          if (
+            error.code === '42501' ||
+            error.message?.includes('Permissão insuficiente') ||
+            error.message?.includes('Autenticação obrigatória')
+          ) {
+            throw new Error(error.message || 'Permissão insuficiente: apenas administradores ou secretaria podem gerenciar convites.');
+          }
+
+          // Erro de rate-limit / anti-spam (cooldown de 60s)
+          if (error.code === '22023' || error.message?.includes('segundos atrás')) {
+            throw new Error(error.message || 'Um e-mail já foi enviado recentemente para este convite. Aguarde 1 minuto antes de reenviar.');
+          }
+
+          // Se for erro 42883 mas referente a outra função interna (ex: has_tenant_role ou gen_random_bytes)
+          if (error.code === '42883') {
+            throw new Error(
+              `Erro interno no banco ao executar a gestão de convites (${error.message || 'função interna não encontrada'}). Aplique a atualização da função has_tenant_role/manage_portal_account_access.`
+            );
+          }
+
+          // Qualquer outro erro do banco (apresenta a mensagem real sem mascarar)
+          throw new Error(error.message || 'Falha ao gerenciar conta de acesso no Supabase.');
+        }
+
+        if (data?.success === false) {
+          throw new Error(data.message || 'O banco não confirmou a operação de acesso ao portal.');
+        }
+
+        if (['invite', 'resend_invite'].includes(normalizedAction) && !data?.invite_code) {
+          throw new Error('O banco não confirmou a gravação do convite. Nenhum e-mail foi enviado.');
+        }
+
+        if (data?.invite_code) remoteInviteCode = data.invite_code;
       }
-      const { data, error } = await supabase.rpc('manage_portal_account_access', {
-        p_tenant_id: params.tenantId,
-        p_target_type: params.targetType,
-        p_target_id: params.targetId,
-        p_action: normalizedAction,
-        p_email: params.email?.trim().toLowerCase() || null,
-        p_allow_anthropometry: params.allowAnthropometry !== undefined ? params.allowAnthropometry : null,
-      });
-      if (error) {
-        const rpcMissing = error.code === '42883' || error.code === 'PGRST202';
-        throw new Error(
-          rpcMissing
-            ? 'O serviço de convites do portal não está instalado no banco da academia. Aplique a migration 36 antes de gerar ou reenviar convites.'
-            : error.message || 'Falha ao gerenciar conta de acesso no Supabase.'
-        );
-      }
-      if (data?.success === false) throw new Error(data.message || 'O banco não confirmou a operação de acesso ao portal.');
-      if (['invite', 'resend_invite'].includes(normalizedAction) && !data?.invite_code) {
-        throw new Error('O banco não confirmou a gravação do convite. Nenhum e-mail foi enviado.');
-      }
-      if (data?.invite_code) remoteInviteCode = data.invite_code;
     }
 
     const allStudents = DataStore.getStudents();
