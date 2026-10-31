@@ -377,7 +377,7 @@ async function runTests() {
           tenantId: regA.tenant.id,
           name: 'Tentativa Escalonamento',
           email: 'hacker@dojosamurai.com.br',
-          role: 'superadmin',
+          role: 'superadmin' as any,
           branchId: regA.branch.id,
           mode: 'direct_active',
         },

@@ -91,12 +91,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     // 1. Detecta ou aguarda resolução de sessão do Google OAuth / Supabase
     if (supabaseActive) {
-      authService.getOrWaitForSession().then((session) => {
+      authService.getOrWaitForSession().then(async (session) => {
         if (isMounted && session?.user) {
           setAuthenticatedUser(session.user);
           if (session.user.email) setEmail(session.user.email);
           if (session.user.user_metadata?.full_name) {
             setFullName(session.user.user_metadata.full_name);
+          }
+
+          // Se o usuário já tiver vínculos ativos na academia (ex: aluno ou gestor com membership ativo),
+          // conclui o login imediatamente sem exigir cliques adicionais ou exibição de erros.
+          try {
+            const userMemberships = await authService.loadUserMemberships(session.user.id);
+            if (isMounted && userMemberships.length > 0 && onAuthSuccess) {
+              onAuthSuccess(session.user, userMemberships);
+              onClose();
+              return;
+            }
+          } catch (mErr) {
+            console.warn('Aviso ao carregar vínculos no modal de login:', mErr);
           }
         }
       });
@@ -420,6 +433,118 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
       // Modo Login padrão
       if (supabaseActive) {
+        // 1. Verifica se já existe sessão real ativa (Google OAuth ou Supabase Auth)
+        const currentActiveSession = authenticatedUser?.id
+          ? { user: authenticatedUser }
+          : await authService.getOrWaitForSession(600);
+        const sessionUser = currentActiveSession?.user || null;
+
+        if (sessionUser) {
+          // CENÁRIO A: Usuário já autenticado via Google OAuth (ou sessão ativa)
+          // NÃO EXECUTAR signInWithEmail e NÃO EXIGIR SENHA!
+          let memberships = await authService.loadUserMemberships(sessionUser.id);
+
+          if (memberships.length > 0) {
+            // Possui vínculo ativo: acessa o portal correspondente (aluno, responsável, gestor)
+            if (onAuthSuccess) {
+              onAuthSuccess(sessionUser, memberships);
+            }
+            onClose();
+            return;
+          }
+
+          // CENÁRIO C: Usuário autenticado pelo Google, mas ainda SEM vínculo ativo na academia
+          // Verifica se há convite pendente armazenado ou na URL
+          let targetCode = inviteCode.trim();
+          let targetCpf = cpf.trim();
+
+          if (!targetCode) {
+            try {
+              const urlParams = new URLSearchParams(window.location.search);
+              const urlCode = urlParams.get('invite');
+              if (urlCode) targetCode = urlCode.trim();
+              const pendingRaw = localStorage.getItem('tatame_pending_invite');
+              if (pendingRaw) {
+                const parsed = JSON.parse(pendingRaw);
+                if (parsed?.code && !targetCode) targetCode = String(parsed.code).trim();
+                if (parsed?.cpf && !targetCpf) targetCpf = String(parsed.cpf).trim();
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          // Se tiver código de convite e CPF informados, vincula o acesso imediatamente
+          if (targetCode && targetCpf) {
+            setAuthMode('claim_invite');
+            setInviteCode(targetCode);
+            setCpf(formatCPF(targetCpf));
+
+            const claimRes = await portalAccessService.claimPortalInvitation({
+              inviteCode: targetCode,
+              cpf: targetCpf,
+              userId: sessionUser.id,
+              userEmail: sessionUser.email || normalizedEmail,
+              userName: sessionUser.user_metadata?.full_name || fullName.trim(),
+              acceptedTerms: true,
+            });
+
+            if (claimRes.success) {
+              try {
+                localStorage.removeItem('tatame_pending_invite');
+              } catch {
+                // ignore
+              }
+              let freshMemberships = await authService.loadUserMemberships(sessionUser.id);
+              if (freshMemberships.length === 0 && claimRes.tenantId) {
+                const tenantSettings = await authService.fetchTenantSettings(claimRes.tenantId);
+                freshMemberships = [
+                  {
+                    id: `mem-${Date.now()}`,
+                    tenant_id: claimRes.tenantId,
+                    role: claimRes.role,
+                    status: 'active',
+                    student_id: claimRes.studentId || null,
+                    guardian_person_id: claimRes.guardianPersonId || null,
+                    tenant: tenantSettings ? { ...tenantSettings } : null,
+                  } as UserMembership,
+                ];
+              }
+              if (onAuthSuccess) {
+                onAuthSuccess(sessionUser, freshMemberships);
+              }
+              onClose();
+              return;
+            } else {
+              setError(claimRes.message);
+              setLoading(false);
+              return;
+            }
+          }
+
+          // Se ainda não tiver código de convite / CPF preenchidos:
+          // Direciona para a aba 'Ativar Convite' com mensagem orientativa clara.
+          // NUNCA exibe "E-mail ou senha incorretos"!
+          setAuthMode('claim_invite');
+          if (targetCode) {
+            setInviteCode(targetCode);
+            handleVerifyInviteCode(targetCode);
+          }
+          if (targetCpf) setCpf(formatCPF(targetCpf));
+          setError(
+            `Sua conta Google (${sessionUser.email}) foi autenticada com sucesso, mas ainda não possui vínculo ativo com uma academia. Para acessar o Portal do Aluno ou Responsável, informe o código do convite e o CPF cadastrado na matrícula.`
+          );
+          setLoading(false);
+          return;
+        }
+
+        // CENÁRIO B: Usuário NÃO autenticado -> Login tradicional com e-mail e senha
+        if (!password) {
+          setError('Informe sua senha de acesso.');
+          setLoading(false);
+          return;
+        }
+
         const { data, error: err } = await authService.signInWithEmail(normalizedEmail, password);
         if (err) throw err;
 
@@ -430,6 +555,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           }
           onClose();
         }
+        return;
       } else {
         const allUsers = DataStore.getUsers();
         const matchedUsers = allUsers.filter(
@@ -764,11 +890,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
 
             {authMode !== 'forgot' && (
-              authMode === 'claim_invite' && authenticatedUser ? (
+              authenticatedUser ? (
                 <div className="p-2.5 rounded-lg border border-emerald-500/20 bg-emerald-950/20 text-[11px] text-emerald-300 flex items-start gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
                   <span>
-                    Autenticado com a conta Google (<strong>{authenticatedUser.email}</strong>). Nenhuma senha adicional é necessária para validar este convite.
+                    {authMode === 'claim_invite' ? (
+                      <>
+                        Autenticado com a conta Google (<strong>{authenticatedUser.email}</strong>). Nenhuma senha adicional é necessária para validar este convite.
+                      </>
+                    ) : (
+                      <>
+                        Sessão Google ativa (<strong>{authenticatedUser.email}</strong>). Nenhuma senha adicional é necessária para acessar o ambiente.
+                      </>
+                    )}
                   </span>
                 </div>
               ) : (
@@ -846,7 +980,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <span>Processando...</span>
               ) : authMode === 'login' ? (
                 <>
-                  <span>Entrar no Ambiente da Academia</span>
+                  <span>
+                    {authenticatedUser
+                      ? 'Acessar Ambiente da Academia'
+                      : 'Entrar no Ambiente da Academia'}
+                  </span>
                   <ArrowRight className="h-4 w-4" />
                 </>
               ) : authMode === 'claim_invite' ? (

@@ -403,6 +403,7 @@ export default function App() {
         applyMembershipContext(sessionUser, memberships, {
           preserveNavigation: isAlreadyActiveSameUser,
         });
+        setIsLoginOpen(false);
         try {
           localStorage.removeItem('tatame_pending_invite');
         } catch {
@@ -580,6 +581,7 @@ export default function App() {
     setCurrentTenantId(primary.tenant_id);
     if (primary.branch_id) setCurrentBranchId(primary.branch_id);
     setCurrentUserId(user.id);
+    setIsLoginOpen(false);
 
     if (options?.preserveNavigation) {
       return;
@@ -601,6 +603,7 @@ export default function App() {
   };
 
   const handleAuthSuccess = (user: any, memberships: UserMembership[]) => {
+    setIsLoginOpen(false);
     if (memberships && memberships.length > 0) {
       applyMembershipContext(user, memberships);
     } else {
