@@ -11,6 +11,7 @@
 
 import { DataStore } from '../data/storage';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
+import { saasPlatformService } from '../services/saasPlatformService';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -529,6 +530,31 @@ async function runTestSuite() {
   });
   assert(resCanceled.status === 200, 'subscription_canceled responde HTTP 200');
   assert(resCanceled.body.status === 'subscription_canceled', 'Cancelamento registrado');
+
+  // ---------------------------------------------------------------------------
+  // CENÁRIO 10: Geração de Link de Checkout Kiwify para Plano Básico
+  // ---------------------------------------------------------------------------
+  console.log('\n--- CENÁRIO 10: Geração de Link de Checkout Kiwify (Plano Básico) ---');
+
+  const basicLink = await saasPlatformService.createKiwifyCheckoutLink({
+    tenantId: TEST_TENANT_ID,
+    planId: 'basic',
+    billingCycle: 'monthly',
+    referenceCode: 'TC-2E61B0E008',
+  });
+
+  assert(basicLink.success === true, 'Geração do link Kiwify retornou sucesso');
+  assert(basicLink.referenceCode === 'TC-2E61B0E008', 'Código de rastreamento TC-2E61B0E008 foi preservado');
+  assert(
+    basicLink.checkoutUrl === 'https://pay.kiwify.com.br/gZRtyPc?sck=TC-2E61B0E008',
+    'URL exata montada corretamente: https://pay.kiwify.com.br/gZRtyPc?sck=TC-2E61B0E008'
+  );
+
+  // Validação através da API URL e searchParams
+  const parsedUrl = new URL(basicLink.checkoutUrl);
+  assert(parsedUrl.origin === 'https://pay.kiwify.com.br', 'Origem da URL é https://pay.kiwify.com.br');
+  assert(parsedUrl.pathname === '/gZRtyPc', 'Pathname é /gZRtyPc');
+  assert(parsedUrl.searchParams.get('sck') === 'TC-2E61B0E008', 'Parâmetro searchParams sck é exatamente TC-2E61B0E008');
 
   console.log('\n🥋 ========================================================');
   console.log(`🥋 TODOS OS ${passedTests}/${totalTests} TESTES DA INTEGRAÇÃO KIWIFY/N8N FORAM APROVADOS!`);

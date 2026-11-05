@@ -3704,6 +3704,7 @@ export const saasPlatformService = {
     planId: string;
     billingCycle: BillingCycle;
     kiwifyOfferBaseUrl?: string;
+    referenceCode?: string;
   }): Promise<{
     success: boolean;
     referenceCode: string;
@@ -3712,9 +3713,9 @@ export const saasPlatformService = {
     message?: string;
   }> {
     const { tenantId, planId, billingCycle } = params;
-    let referenceCode = `TC-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    let referenceCode = params.referenceCode || `TC-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
-    if (isSupabaseConfigured() && supabase) {
+    if (!params.referenceCode && isSupabaseConfigured() && supabase) {
       try {
         const { data, error } = await supabase.rpc('create_saas_checkout_reference', {
           p_tenant_id: tenantId,
@@ -3730,9 +3731,21 @@ export const saasPlatformService = {
       }
     }
 
-    // URL base de checkout da Kiwify (padrão configurável ou fallback oficial)
-    const baseUrl = params.kiwifyOfferBaseUrl || 'https://pay.kiwify.com.br';
-    const checkoutUrl = `${baseUrl}?sck=${encodeURIComponent(referenceCode)}`;
+    // Mapeamento de ofertas oficiais da Kiwify por plano comercial
+    const KIWIFY_CHECKOUT_OFFERS: Record<string, string> = {
+      basic: 'https://pay.kiwify.com.br/gZRtyPc',
+    };
+
+    // Determina a URL base: parâmetro explícito, URL cadastrada para o plano ou fallback
+    const rawBaseUrl =
+      params.kiwifyOfferBaseUrl ||
+      KIWIFY_CHECKOUT_OFFERS[planId] ||
+      'https://pay.kiwify.com.br';
+
+    // Montagem do endereço utilizando a API URL e searchParams
+    const checkoutUrlObj = new URL(rawBaseUrl);
+    checkoutUrlObj.searchParams.set('sck', referenceCode);
+    const checkoutUrl = checkoutUrlObj.toString();
 
     return {
       success: true,
