@@ -1,0 +1,37 @@
+# Supabase CLI Configuration — Tatame Club
+# Project: knmzzndugadmklzzgtaa
+
+project_id = "knmzzndugadmklzzgtaa"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+
+[studio]
+enabled = true
+port = 54323
+
+# ==============================================================================
+# EDGE FUNCTIONS CONFIGURATION
+# ==============================================================================
+# kiwify-n8n-ingest: endpoint de ingestão de webhooks chamado pelo n8n.
+# Não utiliza JWT de usuário do Supabase; a segurança é garantida pelo
+# header próprio x-tatame-integration-secret e pela validação de assinatura Kiwify.
+[functions.kiwify-n8n-ingest]
+verify_jwt = false
+
+# As demais Edge Functions preservam a exigência padrão de JWT
+[functions.platform-owner-bootstrap]
+verify_jwt = true
+
+[functions.send-portal-invitation-email]
+verify_jwt = true
+
+[functions.send-saas-payment-email]
+verify_jwt = true

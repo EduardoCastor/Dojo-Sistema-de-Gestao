@@ -5,10 +5,14 @@
 // Empresa: Beaver Soluções em Tecnologia (CNPJ: 28.410.730/0001-80)
 //
 // Arquitetura:
-//   Kiwify -> n8n -> Supabase Edge Function (kiwify-n8n-ingest) -> Supabase PostgreSQL -> Tatame Club
+//   Kiwify -> n8n -> Supabase Edge Function (kiwify-n8n-ingest) -> PostgreSQL RPC -> Tatame Club
 //
 // Endpoint Oficial:
 //   POST https://knmzzndugadmklzzgtaa.supabase.co/functions/v1/kiwify-n8n-ingest
+//
+// Configuração JWT (supabase/config.toml):
+//   [functions.kiwify-n8n-ingest]
+//   verify_jwt = false
 //
 // Autenticação de Comunicação (n8n -> Edge Function):
 //   Header obrigatório: 'x-tatame-integration-secret'
@@ -16,13 +20,13 @@
 //
 // Validação de Autenticidade da Origem (Kiwify -> n8n -> Edge Function):
 //   Validado contra o Supabase Secret: 'KIWIFY_WEBHOOK_TOKEN'
-//   Verifica se query_signature coincide com o token oficial da Kiwify ou hash HMAC-SHA1
+//   Compara query_signature (recebido via ?signature=...) usando timingSafeEqual ou HMAC-SHA1
 //
 // Required Supabase Secrets:
 //   - SUPABASE_URL
 //   - SUPABASE_SERVICE_ROLE_KEY
-//   - TATAME_INTEGRATION_SECRET (segredo compartilhado exclusivamente entre n8n e Tatame Club)
-//   - KIWIFY_WEBHOOK_TOKEN (token de autenticação fornecido na configuração de webhooks da Kiwify)
+//   - TATAME_INTEGRATION_SECRET (segredo de canal n8n -> Supabase)
+//   - KIWIFY_WEBHOOK_TOKEN (token de autenticação de webhooks da Kiwify)
 // ============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
@@ -33,9 +37,10 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// Algoritmo de validação de HMAC-SHA1 para assinaturas de webhook quando aplicável
+// Algoritmo de validação de HMAC-SHA1 para assinaturas de webhook Kiwify
 async function verifyHmacSha1(secret: string, bodyText: string, expectedHexSignature: string): Promise<boolean> {
   try {
+    if (!secret || !bodyText || !expectedHexSignature) return false;
     const encoder = new TextEncoder();
     const keyData = encoder.encode(secret);
     const cryptoKey = await crypto.subtle.importKey(
@@ -48,14 +53,15 @@ async function verifyHmacSha1(secret: string, bodyText: string, expectedHexSigna
     const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(bodyText));
     const hashArray = Array.from(new Uint8Array(signatureBuffer));
     const calculatedHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toLowerCase();
-    return calculatedHex === expectedHexSignature.toLowerCase();
+    return timingSafeEqual(calculatedHex, expectedHexSignature.toLowerCase());
   } catch (_e) {
     return false;
   }
 }
 
-// Algoritmo de comparação segura em tempo constante
+// Algoritmo de comparação segura em tempo constante (evita timing attacks)
 function timingSafeEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
   let result = 0;
   for (let i = 0; i < a.length; i++) {
@@ -74,7 +80,8 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         ok: false,
-        error: 'Método HTTP não permitido. Utilize POST.',
+        processed: false,
+        message: 'Método HTTP não permitido. Utilize POST.',
       }),
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -89,52 +96,57 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         ok: false,
-        error: 'Configuração interna do Supabase ausente (SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY).',
+        processed: false,
+        message: 'Configuração interna do Supabase ausente.',
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
+  // --------------------------------------------------------------------------
   // 1. AUTENTICAÇÃO DO CANAL N8N -> SUPABASE EDGE FUNCTION
-  // Verifica o header x-tatame-integration-secret
+  // --------------------------------------------------------------------------
+  if (!integrationSecret) {
+    console.error('[kiwify-n8n-ingest] ERRO: TATAME_INTEGRATION_SECRET não configurado nos secrets.');
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        processed: false,
+        message: 'Configuração de segredo de integração ausente no servidor.',
+      }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
   const incomingIntegrationSecret = req.headers.get('x-tatame-integration-secret') || '';
 
-  if (!integrationSecret) {
-    console.error('[kiwify-n8n-ingest] ERRO CRÍTICO: Segredo TATAME_INTEGRATION_SECRET não configurado nos secrets do Supabase.');
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        code: 'MISSING_SERVER_SECRET',
-        error: 'Segredo de integração TATAME_INTEGRATION_SECRET não configurado na Edge Function.',
-      }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  }
-
   if (!incomingIntegrationSecret || !timingSafeEqual(incomingIntegrationSecret, integrationSecret)) {
-    console.warn('[kiwify-n8n-ingest] Tentativa de chamada não autorizada: x-tatame-integration-secret inválido ou ausente.');
+    // Nunca registrar o segredo recebido nos logs por segurança
+    console.warn('[kiwify-n8n-ingest] Requisição bloqueada: cabeçalho x-tatame-integration-secret inválido ou ausente.');
     return new Response(
       JSON.stringify({
         ok: false,
-        code: 'UNAUTHORIZED_INTEGRATION',
-        error: 'Acesso negado: header x-tatame-integration-secret inválido ou ausente.',
+        processed: false,
+        message: 'Evento não autorizado ou não elegível para processamento: segredo de integração inválido.',
       }),
       { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
-  // 2. PARSE E VALIDAÇÃO DO CORPO DA REQUISIÇÃO (CONTRATO JSON N8N)
-  let body: any;
+  // --------------------------------------------------------------------------
+  // 2. PARSE E EXTRAÇÃO DO CORPO DA REQUISIÇÃO
+  // --------------------------------------------------------------------------
   let rawBodyText = '';
+  let body: any;
   try {
     rawBodyText = await req.text();
     body = JSON.parse(rawBodyText);
-  } catch (err: any) {
+  } catch (_err) {
     return new Response(
       JSON.stringify({
         ok: false,
-        code: 'INVALID_JSON',
-        error: 'Corpo da requisição não é um JSON válido: ' + (err?.message || ''),
+        processed: false,
+        message: 'Corpo da requisição não é um JSON válido.',
       }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -144,45 +156,62 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         ok: false,
-        code: 'EMPTY_PAYLOAD',
-        error: 'Payload vazio ou em formato inválido.',
+        processed: false,
+        message: 'Payload vazio ou em formato inválido.',
       }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
+  // --------------------------------------------------------------------------
+  // 3. VALIDAÇÃO EFETIVA DA ORIGEM KIWIFY (AUTENTICIDADE DO WEBHOOK)
+  // --------------------------------------------------------------------------
+  // A Kiwify envia na query string ?signature=<token_ou_hmac_hex>
   const querySignature = (body.query_signature || '').trim();
   const rawBodyFromN8n = body.raw_body || '';
-  let signatureVerified = false;
 
-  // 3. VALIDAÇÃO EFETIVA DA ORIGEM KIWIFY
-  // A Kiwify envia na query string ?signature=<token_ou_hmac>
-  if (kiwifyWebhookToken) {
-    // 3.1 Verificação padrão Kiwify: query_signature coincide diretamente com o Webhook Token
-    if (querySignature && timingSafeEqual(querySignature, kiwifyWebhookToken)) {
-      signatureVerified = true;
-    }
-    // 3.2 Verificação HMAC-SHA1 alternativa se o n8n tiver fornecido os bytes/texto bruto
-    else if (querySignature && rawBodyFromN8n && (await verifyHmacSha1(kiwifyWebhookToken, rawBodyFromN8n, querySignature))) {
-      signatureVerified = true;
-    } else {
-      console.warn(`[kiwify-n8n-ingest] Assinatura Kiwify divergente do segredo KIWIFY_WEBHOOK_TOKEN configurado.`);
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          code: 'INVALID_KIWIFY_SIGNATURE',
-          error: 'Falha na validação de autenticidade da Kiwify: query_signature não coincide com o token configurado.',
-        }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-  } else {
-    // Aviso de auditoria caso o token da Kiwify ainda não tenha sido cadastrado nos secrets do Supabase
-    console.warn('[kiwify-n8n-ingest] AVISO: KIWIFY_WEBHOOK_TOKEN não definido nos secrets do Supabase. A autenticação baseou-se exclusivamente no x-tatame-integration-secret.');
-    signatureVerified = false;
+  if (!kiwifyWebhookToken) {
+    console.error('[kiwify-n8n-ingest] ERRO: KIWIFY_WEBHOOK_TOKEN não configurado nos secrets.');
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        processed: false,
+        message: 'Configuração de validação Kiwify ausente no servidor.',
+      }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
-  // 4. PREPARAR OBJETO NORMALIZADO PARA INGESTÃO ATÔMICA NO BANCO
+  let signatureVerified = false;
+
+  // Verificação 1: Comparação direta em tempo constante (quando repassado o token de assinatura)
+  if (querySignature && timingSafeEqual(querySignature, kiwifyWebhookToken)) {
+    signatureVerified = true;
+  }
+  // Verificação 2: Validação criptográfica HMAC-SHA1 oficial da Kiwify sobre o corpo cru
+  else if (querySignature && (rawBodyFromN8n || rawBodyText)) {
+    const textToVerify = rawBodyFromN8n || rawBodyText;
+    if (await verifyHmacSha1(kiwifyWebhookToken, textToVerify, querySignature)) {
+      signatureVerified = true;
+    }
+  }
+
+  // REJEIÇÃO OBRIGATÓRIA: Nunca prosseguir se a assinatura não for comprovada
+  if (!signatureVerified) {
+    console.warn('[kiwify-n8n-ingest] Assinatura Kiwify inválida ou divergente do token configurado.');
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        processed: false,
+        message: 'Evento não autorizado ou não elegível para processamento: assinatura Kiwify inválida.',
+      }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // 4. PREPARAR OBJETO NORMALIZADO PARA INGESTÃO ATÔMICA NA RPC
+  // --------------------------------------------------------------------------
   const eventPayload = {
     source: body.source || 'kiwify-n8n',
     received_at: body.received_at || new Date().toISOString(),
@@ -209,12 +238,14 @@ Deno.serve(async (req: Request) => {
     product_base_price_minor: body.product_base_price_minor !== undefined ? body.product_base_price_minor : null,
     settlement_amount_minor: body.settlement_amount_minor !== undefined ? body.settlement_amount_minor : null,
     query_signature: querySignature,
-    signature_verified: signatureVerified,
+    signature_verified: true, // Garantidamente true após a validação acima
     raw_payload: body.raw_payload || body,
     raw_headers: body.raw_headers || null,
   };
 
-  // 5. EXECUTAR RPC ATÔMICA TRANSACTIONAL NO SUPABASE POSTGRESQL
+  // --------------------------------------------------------------------------
+  // 5. EXECUTAR RPC ATÔMICA TRANSACTIONAL NO POSTGRESQL
+  // --------------------------------------------------------------------------
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false },
   });
@@ -225,50 +256,61 @@ Deno.serve(async (req: Request) => {
     });
 
     if (error) {
-      console.error('[kiwify-n8n-ingest] Erro na execução da RPC process_kiwify_n8n_event:', error);
+      console.error('[kiwify-n8n-ingest] Erro na execução da RPC:', error.message);
       return new Response(
         JSON.stringify({
           ok: false,
-          code: 'DB_PROCESSING_ERROR',
-          error: 'Falha interna ao persistir o evento no banco de dados: ' + error.message,
+          processed: false,
+          message: 'Falha interna ao persistir o evento no banco de dados.',
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Se o banco retornou sucesso (processado, duplicado ou pendente de associação)
-    if (data?.ok) {
+    // Se o pedido já tiver sido processado (idempotência)
+    if (data?.duplicate) {
       return new Response(
         JSON.stringify({
           ok: true,
-          processed: Boolean(data.processed),
-          duplicate: Boolean(data.duplicate),
-          status: data.status,
-          event_type: data.event_type || body.event_type,
-          order_id: data.order_id || body.order_id,
-          tenant_id: data.tenant_id,
-          message: data.message || 'Evento Kiwify processado com sucesso.',
+          processed: false,
+          duplicate: true,
+          message: data.message || 'Pedido já processado anteriormente.',
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Se o banco retornou erro estruturado (ex: campos obrigatórios ausentes)
+    // Se o processamento concluiu e a licença foi liberada com sucesso
+    if (data?.ok && data?.processed) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          processed: true,
+          duplicate: false,
+          status: data.status || 'license_activated',
+          tenant_id: data.tenant_id,
+          message: data.message || 'Pagamento validado e licença liberada.',
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Se o evento não for elegível ou falhar em validações de negócio
     return new Response(
       JSON.stringify({
         ok: false,
-        code: data?.code || 'VALIDATION_FAILED',
-        error: data?.error || 'Não foi possível validar o evento recebido.',
+        processed: false,
+        message: data?.message || 'Evento não autorizado ou não elegível para processamento.',
       }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
-    console.error('[kiwify-n8n-ingest] Exceção não tratada:', err);
+    console.error('[kiwify-n8n-ingest] Exceção não tratada:', err?.message || err);
     return new Response(
       JSON.stringify({
         ok: false,
-        code: 'INTERNAL_EXCEPTION',
-        error: 'Erro inesperado no processamento do evento: ' + (err?.message || ''),
+        processed: false,
+        message: 'Erro inesperado no processamento do evento.',
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
