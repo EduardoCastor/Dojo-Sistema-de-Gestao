@@ -46,8 +46,31 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [requestResult, setRequestResult] = useState<PlanSubscriptionRequestResult | null>(null);
   const [copiedPix, setCopiedPix] = useState(false);
+  const [kiwifyCheckoutData, setKiwifyCheckoutData] = useState<{ referenceCode: string; checkoutUrl: string } | null>(null);
+  const [generatingKiwify, setGeneratingKiwify] = useState(false);
 
   const pixConfig = saasPlatformService.getCentralizedPixConfig();
+
+  const handleGenerateKiwifyCheckout = async () => {
+    if (!selectedPlan || !tenant) return;
+    setErrorMsg(null);
+    setGeneratingKiwify(true);
+    try {
+      const res = await saasPlatformService.createKiwifyCheckoutLink({
+        tenantId: tenant.id,
+        planId: selectedPlan.id,
+        billingCycle: selectedCycle,
+      });
+      setKiwifyCheckoutData({
+        referenceCode: res.referenceCode,
+        checkoutUrl: res.checkoutUrl,
+      });
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Falha ao gerar link de checkout Kiwify.');
+    } finally {
+      setGeneratingKiwify(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && tenant) {
@@ -176,7 +199,7 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
             </div>
           )}
 
-          {!requestResult ? (
+          {!requestResult && !kiwifyCheckoutData ? (
             <>
               {/* Billing Cycle Selector */}
               <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
@@ -389,16 +412,72 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
                 <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-zinc-400 leading-relaxed">
                   <strong className="text-zinc-200 block mb-0.5">
-                    Importante sobre a liberação de acesso:
+                    Formas de Pagamento Disponíveis:
                   </strong>
-                  Ao confirmar a solicitação, sua assinatura ficará registrada com status{' '}
-                  <strong className="text-amber-300">Pagamento Pendente (pending_payment)</strong>.
-                  O acesso comercial definitivo será liberado após a confirmação válida do pagamento Pix.
-                  Todos os alunos, graduações e registros financeiros da sua academia permanecem 100% preservados.
+                  Você pode assinar diretamente via <strong className="text-white">Kiwify</strong> com liberação automática instantânea (Cartão de Crédito ou Pix), ou gerar a solicitação manual via chave Pix CNPJ da Beaver Soluções.
+                  Todos os dados de alunos, graduações e histórico da sua academia permanecem 100% preservados.
                 </div>
               </div>
             </>
-          ) : (
+          ) : kiwifyCheckoutData ? (
+            /* Kiwify Checkout Confirmation Step */
+            <div className="space-y-5">
+              <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-zinc-300 space-y-1 flex-1">
+                  <p className="font-bold text-emerald-300 text-sm">
+                    Link de Checkout Kiwify Gerado com Sucesso!
+                  </p>
+                  <p className="text-zinc-400">
+                    Código de Rastreamento (SCK):{' '}
+                    <code className="text-white font-mono bg-zinc-900 px-2 py-0.5 rounded font-bold">
+                      {kiwifyCheckoutData.referenceCode}
+                    </code>{' '}
+                    • Academia: <strong className="text-white">{tenant.tradeName}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-300 border-b border-zinc-800 pb-2">
+                  Instruções para Ativação Automática via Kiwify:
+                </h4>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Ao concluir o pagamento no ambiente seguro da Kiwify, o webhook integrado via n8n confirmará o pagamento instantaneamente na Edge Function do Supabase e sua assinatura passará imediatamente para <strong className="text-emerald-400 font-bold">Ativa</strong>, liberando todos os recursos do plano sem necessidade de envio manual de comprovante.
+                </p>
+
+                <div className="p-3 bg-zinc-900 border border-zinc-700 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
+                    {kiwifyCheckoutData.checkoutUrl}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(kiwifyCheckoutData.checkoutUrl);
+                      setCopiedPix(true);
+                      setTimeout(() => setCopiedPix(false), 2000);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>{copiedPix ? 'Copiado!' : 'Copiar Link'}</span>
+                  </button>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+                  <a
+                    href={kiwifyCheckoutData.checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto flex-1 px-5 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition-all text-center"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Abrir Checkout Oficial da Kiwify</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          ) : requestResult ? (
             /* Confirmation & Pix Instructions Step */
             <div className="space-y-5">
               {/* 1. Database Registration Status */}
@@ -574,12 +653,29 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between gap-3">
-          {requestResult ? (
+          {kiwifyCheckoutData ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setKiwifyCheckoutData(null)}
+                className="px-4 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold transition-colors"
+              >
+                Voltar à Escolha de Planos
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-6 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold transition-all"
+              >
+                Fechar
+              </button>
+            </>
+          ) : requestResult ? (
             <>
               <button
                 type="button"
@@ -601,21 +697,34 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-5 py-2.5 rounded-xl border border-zinc-700 text-zinc-400 hover:text-white text-xs font-semibold transition-colors"
+                className="px-4 py-2.5 rounded-xl border border-zinc-700 text-zinc-400 hover:text-white text-xs font-semibold transition-colors"
               >
                 Cancelar
               </button>
-              <button
-                type="button"
-                disabled={submitting || !selectedPlan}
-                onClick={handleRequestSubscription}
-                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-600/30 transition-all"
-              >
-                <Sparkles className="w-4 h-4" />
-                {submitting
-                  ? 'Registrando Solicitação e Enviando E-mail...'
-                  : `Solicitar ${selectedPlan?.name || 'Plano'} e Receber Chave Pix`}
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={submitting || generatingKiwify || !selectedPlan}
+                  onClick={handleRequestSubscription}
+                  className="px-4 py-2.5 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  title="Gerar solicitação para pagamento via Pix manual com comprovante"
+                >
+                  <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Pix Manual (Chave CNPJ)</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting || generatingKiwify || !selectedPlan}
+                  onClick={handleGenerateKiwifyCheckout}
+                  className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-600/30 transition-all cursor-pointer"
+                  title="Checkout seguro na Kiwify com ativação automática instantânea"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  {generatingKiwify
+                    ? 'Gerando Link...'
+                    : `Assinar via Kiwify (Liberação Automática)`}
+                </button>
+              </div>
             </>
           )}
         </div>

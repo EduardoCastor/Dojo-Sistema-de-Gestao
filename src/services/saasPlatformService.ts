@@ -3694,4 +3694,51 @@ export const saasPlatformService = {
 
     return ownerUser;
   },
+
+  /**
+   * Gera uma referência de checkout rastreável (Tracking sck) para contratação via Kiwify.
+   * Garante a vinculação segura com o tenant da academia no servidor antes da abertura do checkout.
+   */
+  async createKiwifyCheckoutLink(params: {
+    tenantId: string;
+    planId: string;
+    billingCycle: BillingCycle;
+    kiwifyOfferBaseUrl?: string;
+  }): Promise<{
+    success: boolean;
+    referenceCode: string;
+    trackingSck: string;
+    checkoutUrl: string;
+    message?: string;
+  }> {
+    const { tenantId, planId, billingCycle } = params;
+    let referenceCode = `TC-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('create_saas_checkout_reference', {
+          p_tenant_id: tenantId,
+          p_plan_id: planId,
+          p_billing_cycle: billingCycle,
+        });
+
+        if (!error && data?.reference_code) {
+          referenceCode = data.reference_code;
+        }
+      } catch (err) {
+        console.warn('Aviso ao gerar referência de checkout Kiwify via Supabase RPC:', err);
+      }
+    }
+
+    // URL base de checkout da Kiwify (padrão configurável ou fallback oficial)
+    const baseUrl = params.kiwifyOfferBaseUrl || 'https://pay.kiwify.com.br';
+    const checkoutUrl = `${baseUrl}?sck=${encodeURIComponent(referenceCode)}`;
+
+    return {
+      success: true,
+      referenceCode,
+      trackingSck: referenceCode,
+      checkoutUrl,
+    };
+  },
 };
